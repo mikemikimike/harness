@@ -2740,43 +2740,11 @@ func (a *sessionAgent) GenerateTitle(ctx context.Context, sessionID string, user
 		title = cmp.Or(fallback, DefaultSessionName)
 	}
 
-	// Calculate usage and cost.
-	var openrouterCost *float64
-	for _, step := range resp.Steps {
-		stepCost := a.openrouterCost(step.ProviderMetadata)
-		if stepCost != nil {
-			newCost := *stepCost
-			if openrouterCost != nil {
-				newCost += *openrouterCost
-			}
-			openrouterCost = &newCost
-		}
-	}
-
-	modelConfig := model.CatalogCfg
-	cost := modelConfig.CostPer1MInCached/1e6*float64(resp.TotalUsage.CacheCreationTokens) +
-		modelConfig.CostPer1MOutCached/1e6*float64(resp.TotalUsage.CacheReadTokens) +
-		modelConfig.CostPer1MIn/1e6*float64(resp.TotalUsage.InputTokens) +
-		modelConfig.CostPer1MOut/1e6*float64(resp.TotalUsage.OutputTokens)
-
-	// Use override cost if available (e.g., from OpenRouter).
-	if openrouterCost != nil {
-		cost = *openrouterCost
-	}
-
-	// Skip cost accumulation
-	if model.FlatRate {
-		cost = 0
-	}
-
-	promptTokens := resp.TotalUsage.InputTokens + resp.TotalUsage.CacheCreationTokens + resp.TotalUsage.CacheReadTokens
-	completionTokens := resp.TotalUsage.OutputTokens
-
-	// Atomically update only title and usage fields to avoid overriding other
-	// concurrent session updates.
-	saveErr := a.sessions.UpdateTitleAndUsage(ctx, sessionID, title, promptTokens, completionTokens, cost)
-	if saveErr != nil {
-		slog.Error("Failed to save session title and usage", "error", saveErr)
+	// Only the cost is charged, and atomically: the token counters hold the
+	// context size of the coding requests, which the title call is not.
+	charged := sessionUsage(model, resp.TotalUsage, a.stepsOpenrouterCost(resp.Steps), false)
+	if err := a.sessions.UpdateTitleAndCost(ctx, sessionID, title, charged.CostDelta); err != nil {
+		slog.Error("Failed to save session title and cost", "error", err)
 		return
 	}
 	titleSaved = true
@@ -2793,6 +2761,22 @@ func (a *sessionAgent) openrouterCost(metadata fantasy.ProviderMetadata) *float6
 		return nil
 	}
 	return &opts.Usage.Cost
+}
+
+// stepsOpenrouterCost sums the OpenRouter-reported cost of steps, or
+// returns nil when no step reported one.
+func (a *sessionAgent) stepsOpenrouterCost(steps []fantasy.StepResult) *float64 {
+	var cost *float64
+	for _, step := range steps {
+		if stepCost := a.openrouterCost(step.ProviderMetadata); stepCost != nil {
+			total := *stepCost
+			if cost != nil {
+				total += *cost
+			}
+			cost = &total
+		}
+	}
+	return cost
 }
 
 // sessionUsage prices one request's usage for model and names the token

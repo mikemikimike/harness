@@ -3,7 +3,6 @@ package dialog
 import (
 	"testing"
 
-	"charm.land/bubbles/v2/key"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stubbedev/harness/internal/ui/styles"
@@ -16,8 +15,7 @@ func TestCommandItemIsPickerItem(t *testing.T) {
 	t.Parallel()
 
 	sty := styles.CharmtonePantera()
-	var item PickerItem = NewCommandItem(&sty, "new_session", "New Session", ActionNewSession{}).
-		WithShortcut(key.NewBinding(key.WithKeys("ctrl+n"), key.WithHelp("ctrl+n", "new session")))
+	var item PickerItem = NewCommandItem(&sty, "new_session", "New Session", "ctrl+n", ActionNewSession{})
 
 	assert.Equal(t, "New Session", item.Label())
 	assert.Equal(t, "ctrl+n", item.RightLabel())

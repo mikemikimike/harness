@@ -3,7 +3,6 @@ package dialog
 import (
 	"strings"
 
-	"charm.land/bubbles/v2/key"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/sahilm/fuzzy"
@@ -21,9 +20,7 @@ type CommandItem struct {
 	// must be a suffix of the title: match indexes are shifted into the
 	// title for highlighting.
 	filterTitle string
-	// shortcut is the binding that selects the command straight from the
-	// palette; its help key is the row's hint.
-	shortcut    key.Binding
+	shortcut    string
 	description string
 	action      Action
 	aliases     []string
@@ -43,25 +40,15 @@ var (
 )
 
 // NewCommandItem creates a new CommandItem.
-func NewCommandItem(t *styles.Styles, id, title string, action Action) *CommandItem {
+func NewCommandItem(t *styles.Styles, id, title, shortcut string, action Action) *CommandItem {
 	return &CommandItem{
 		Versioned: list.NewVersioned(),
 		id:        id,
 		t:         t,
 		title:     title,
+		shortcut:  shortcut,
 		action:    action,
 	}
-}
-
-// WithShortcut returns the CommandItem selected by every key of the
-// binding, hinted with the binding's help key.
-func (c *CommandItem) WithShortcut(b key.Binding) *CommandItem {
-	c.shortcut = b
-	c.cache = nil
-	if c.Versioned != nil {
-		c.Bump()
-	}
-	return c
 }
 
 // Finished implements list.Item. Command items are render-stable
@@ -139,7 +126,7 @@ func (c *CommandItem) Label() string { return c.title }
 
 // RightLabel implements PickerItem; the shortcut hint is the row's
 // right-aligned info column.
-func (c *CommandItem) RightLabel() string { return c.shortcut.Help().Key }
+func (c *CommandItem) RightLabel() string { return c.shortcut }
 
 // SetFocused implements ListItem.
 func (c *CommandItem) SetFocused(focused bool) {
@@ -170,14 +157,14 @@ func (c *CommandItem) Action() Action {
 	return c.action
 }
 
-// Shortcut returns the binding that selects the command from the palette.
-func (c *CommandItem) Shortcut() key.Binding {
+// Shortcut returns the shortcut associated with the command item.
+func (c *CommandItem) Shortcut() string {
 	return c.shortcut
 }
 
 // InfoText implements infoColumnItem; the command shortcut is its info.
 func (c *CommandItem) InfoText() string {
-	return c.shortcut.Help().Key
+	return c.shortcut
 }
 
 // SetHideInfo controls whether the shortcut hint column is shown. The
@@ -196,7 +183,7 @@ func (c *CommandItem) SetHideInfo(v bool) {
 // Render implements ListItem.
 func (c *CommandItem) Render(width int) string {
 	styles := pickerItemStyles(c.t)
-	shortcut := c.InfoText()
+	shortcut := c.shortcut
 	if c.hideInfo {
 		shortcut = ""
 	}

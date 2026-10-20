@@ -91,12 +91,12 @@ SET
 WHERE id = sqlc.arg(id)
 RETURNING *;
 
--- name: UpdateSessionTitleAndUsage :exec
+-- name: UpdateSessionTitleAndCost :exec
+-- Sets the title and adds the titling request's cost, leaving the token
+-- counters to the coding requests whose context size they measure.
 UPDATE sessions
 SET
     title = ?,
-    prompt_tokens = prompt_tokens + ?,
-    completion_tokens = completion_tokens + ?,
     cost = cost + ?,
     updated_at = strftime('%s', 'now')
 WHERE id = ?;

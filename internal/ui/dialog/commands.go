@@ -119,14 +119,15 @@ func (c *Commands) HandleMsg(msg tea.Msg) Action {
 		case key.Matches(msg, c.keyMap.ShiftTab):
 			c.cycleTab(-1)
 		default:
+			var cmd tea.Cmd
 			for _, item := range c.list.FilteredItems() {
 				if item, ok := item.(*CommandItem); ok && item != nil {
-					if key.Matches(msg, item.Shortcut()) {
+					if msg.String() == item.Shortcut() {
 						return item.SelectAction()
 					}
 				}
 			}
-			cmd, _ := filterInput(&c.input, msg, applyListFilter(c.list))
+			cmd, _ = filterInput(&c.input, msg, applyListFilter(c.list))
 			return ActionCmd{cmd}
 		}
 	}
@@ -253,20 +254,6 @@ func (c *Commands) tabs() []commandMenu {
 	return tabs
 }
 
-// ownKeys returns the bindings the palette handles before any command
-// shortcut. Their keys are stripped from every shortcut, so an entry is
-// never hinted with, nor expected to fire on, a key the palette consumes.
-func (c *Commands) ownKeys() []key.Binding {
-	return []key.Binding{
-		c.keyMap.Close,
-		c.keyMap.Previous,
-		c.keyMap.Next,
-		c.keyMap.Select,
-		c.keyMap.Tab,
-		c.keyMap.ShiftTab,
-	}
-}
-
 // setCommandItems sets the command items based on the specified command type.
 func (c *Commands) setCommandItems(commandType CommandType) {
 	c.selected = commandType
@@ -275,7 +262,7 @@ func (c *Commands) setCommandItems(commandType CommandType) {
 	for _, m := range c.catalog.menus() {
 		if m.tab() == commandType {
 			for _, item := range m.items() {
-				commandItems = append(commandItems, item.WithShortcut(keys.Without(item.Shortcut(), c.ownKeys()...)))
+				commandItems = append(commandItems, item)
 			}
 			break
 		}

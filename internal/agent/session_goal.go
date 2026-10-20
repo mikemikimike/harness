@@ -211,19 +211,9 @@ func (a *sessionAgent) judgeGoal(ctx context.Context, sessionID string, goal *se
 	if err != nil {
 		return goalVerdict{}, fmt.Errorf("judge goal: %w", err)
 	}
-	var cost *float64
-	for _, step := range resp.Steps {
-		if stepCost := a.openrouterCost(step.ProviderMetadata); stepCost != nil {
-			total := *stepCost
-			if cost != nil {
-				total += *cost
-			}
-			cost = &total
-		}
-	}
 	// Only the cost is charged: the token counters describe the coding
 	// request the session stands at, which the judge did not send.
-	if charged := sessionUsage(model, resp.TotalUsage, cost, false); charged.CostDelta > 0 {
+	if charged := sessionUsage(model, resp.TotalUsage, a.stepsOpenrouterCost(resp.Steps), false); charged.CostDelta > 0 {
 		if err := a.sessions.AddCost(ctx, sessionID, charged.CostDelta); err != nil {
 			slog.Warn("Failed to charge the goal judge", "session_id", sessionID, "error", err)
 		}

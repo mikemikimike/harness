@@ -463,32 +463,24 @@ func (q *Queries) UpdateSessionGoal(ctx context.Context, arg UpdateSessionGoalPa
 	return err
 }
 
-const updateSessionTitleAndUsage = `-- name: UpdateSessionTitleAndUsage :exec
+const updateSessionTitleAndCost = `-- name: UpdateSessionTitleAndCost :exec
 UPDATE sessions
 SET
     title = ?,
-    prompt_tokens = prompt_tokens + ?,
-    completion_tokens = completion_tokens + ?,
     cost = cost + ?,
     updated_at = strftime('%s', 'now')
 WHERE id = ?
 `
 
-type UpdateSessionTitleAndUsageParams struct {
-	Title            string  `json:"title"`
-	PromptTokens     int64   `json:"prompt_tokens"`
-	CompletionTokens int64   `json:"completion_tokens"`
-	Cost             float64 `json:"cost"`
-	ID               string  `json:"id"`
+type UpdateSessionTitleAndCostParams struct {
+	Title string  `json:"title"`
+	Cost  float64 `json:"cost"`
+	ID    string  `json:"id"`
 }
 
-func (q *Queries) UpdateSessionTitleAndUsage(ctx context.Context, arg UpdateSessionTitleAndUsageParams) error {
-	_, err := q.db.ExecContext(ctx, updateSessionTitleAndUsage,
-		arg.Title,
-		arg.PromptTokens,
-		arg.CompletionTokens,
-		arg.Cost,
-		arg.ID,
-	)
+// Sets the title and adds the titling request's cost, leaving the token
+// counters to the coding requests whose context size they measure.
+func (q *Queries) UpdateSessionTitleAndCost(ctx context.Context, arg UpdateSessionTitleAndCostParams) error {
+	_, err := q.db.ExecContext(ctx, updateSessionTitleAndCost, arg.Title, arg.Cost, arg.ID)
 	return err
 }

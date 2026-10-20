@@ -203,4 +203,12 @@ func TestNarrowUpdatesKeepConcurrentWrites(t *testing.T) {
 	require.True(t, got.EstimatedUsage)
 	require.InDelta(t, 3.0, got.Cost, 1e-9, "compaction leaves the cost alone")
 	require.Equal(t, "renamed", got.Title)
+
+	require.NoError(t, sessions.UpdateTitleAndCost(t.Context(), created.ID, "titled", 0.25))
+	got, err = sessions.Get(t.Context(), created.ID)
+	require.NoError(t, err)
+	require.Equal(t, "titled", got.Title)
+	require.InDelta(t, 3.25, got.Cost, 1e-9)
+	require.Equal(t, int64(7), got.PromptTokens, "titling leaves the token counters alone")
+	require.Equal(t, int64(0), got.CompletionTokens)
 }

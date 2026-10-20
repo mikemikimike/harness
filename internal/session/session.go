@@ -146,7 +146,9 @@ type Service interface {
 	// SetGoal stores a session's goal, or clears it when goal is nil.
 	// Save leaves the goal untouched.
 	SetGoal(ctx context.Context, sessionID string, goal *Goal) error
-	UpdateTitleAndUsage(ctx context.Context, sessionID, title string, promptTokens, completionTokens int64, cost float64) error
+	// UpdateTitleAndCost sets a session's title and adds costDelta to its
+	// cost in one statement, leaving the token counters untouched.
+	UpdateTitleAndCost(ctx context.Context, sessionID, title string, costDelta float64) error
 	// AddCost atomically adds delta to a session's cost, e.g. accumulating a
 	// completed subagent's cost onto its parent session, without a
 	// fetch-modify-save race against other concurrent updates to that
@@ -335,15 +337,14 @@ func (s *service) SetCompaction(ctx context.Context, sessionID string, compactio
 	return session, nil
 }
 
-// UpdateTitleAndUsage updates only the title and usage fields atomically.
-// This is safer than fetching, modifying, and saving the entire session.
-func (s *service) UpdateTitleAndUsage(ctx context.Context, sessionID, title string, promptTokens, completionTokens int64, cost float64) error {
-	if err := s.q.UpdateSessionTitleAndUsage(ctx, db.UpdateSessionTitleAndUsageParams{
-		ID:               sessionID,
-		Title:            title,
-		PromptTokens:     promptTokens,
-		CompletionTokens: completionTokens,
-		Cost:             cost,
+// UpdateTitleAndCost sets the title and adds costDelta to the cost
+// atomically. The token counters are left alone: they hold the context
+// size of the session's coding requests, which a titling request is not.
+func (s *service) UpdateTitleAndCost(ctx context.Context, sessionID, title string, costDelta float64) error {
+	if err := s.q.UpdateSessionTitleAndCost(ctx, db.UpdateSessionTitleAndCostParams{
+		ID:    sessionID,
+		Title: title,
+		Cost:  costDelta,
 	}); err != nil {
 		return err
 	}

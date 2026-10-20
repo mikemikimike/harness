@@ -594,19 +594,9 @@ func (a *sessionAgent) summarizeMessages(
 		return "", fmt.Errorf("summarize session: the model returned no summary")
 	}
 
-	var cost *float64
-	for _, step := range resp.Steps {
-		if stepCost := a.openrouterCost(step.ProviderMetadata); stepCost != nil {
-			total := *stepCost
-			if cost != nil {
-				total += *cost
-			}
-			cost = &total
-		}
-	}
 	// Only the cost is charged, and atomically: the token counters are
 	// replaced by the compacted request's projection once it is known.
-	if delta := sessionUsage(model, resp.TotalUsage, cost, false); delta.CostDelta > 0 {
+	if delta := sessionUsage(model, resp.TotalUsage, a.stepsOpenrouterCost(resp.Steps), false); delta.CostDelta > 0 {
 		if err := a.sessions.AddCost(ctx, sess.ID, delta.CostDelta); err != nil {
 			slog.Warn("Failed to charge the compaction summary", "session_id", sess.ID, "error", err)
 		}

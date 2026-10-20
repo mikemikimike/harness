@@ -78,7 +78,7 @@ func (s *stubSessionService) SetGoal(context.Context, string, *session.Goal) err
 	return nil
 }
 
-func (s *stubSessionService) UpdateTitleAndUsage(context.Context, string, string, int64, int64, float64) error {
+func (s *stubSessionService) UpdateTitleAndCost(context.Context, string, string, float64) error {
 	return nil
 }
 

@@ -200,7 +200,7 @@ func (d *serversDialog) refreshServers() {
 	d.listNames = d.source.entries()
 	items := make([]list.FilterableItem, len(d.listNames))
 	for i, name := range d.listNames {
-		items[i] = NewCommandItem(d.com.Styles, "server_"+name, name, nil).
+		items[i] = NewCommandItem(d.com.Styles, "server_"+name, name, "", nil).
 			WithDescription(d.source.statusText(name))
 	}
 	d.list.SetItems(items...)
@@ -280,6 +280,7 @@ func (b *detailBuilder) Row(text string) *detailBuilder {
 		b.com.Styles,
 		fmt.Sprintf("%s_row_%d", b.prefix, len(b.items)),
 		text,
+		"",
 		nil,
 	))
 	return b
@@ -287,7 +288,7 @@ func (b *detailBuilder) Row(text string) *detailBuilder {
 
 // Action appends an action row; selecting it returns act.
 func (b *detailBuilder) Action(id, title, desc string, act Action) *detailBuilder {
-	b.items = append(b.items, NewCommandItem(b.com.Styles, b.prefix+"_"+id, title, act).WithDescription(desc))
+	b.items = append(b.items, NewCommandItem(b.com.Styles, b.prefix+"_"+id, title, "", act).WithDescription(desc))
 	return b
 }
 

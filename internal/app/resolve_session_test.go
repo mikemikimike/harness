@@ -70,7 +70,7 @@ func (m *mockSessionService) SetGoal(context.Context, string, *session.Goal) err
 	return nil
 }
 
-func (m *mockSessionService) UpdateTitleAndUsage(context.Context, string, string, int64, int64, float64) error {
+func (m *mockSessionService) UpdateTitleAndCost(context.Context, string, string, float64) error {
 	return nil
 }
 

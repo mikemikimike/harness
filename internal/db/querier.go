@@ -73,7 +73,9 @@ type Querier interface {
 	// leaving title, cost and todos to their own writers.
 	UpdateSessionCompaction(ctx context.Context, arg UpdateSessionCompactionParams) (Session, error)
 	UpdateSessionGoal(ctx context.Context, arg UpdateSessionGoalParams) error
-	UpdateSessionTitleAndUsage(ctx context.Context, arg UpdateSessionTitleAndUsageParams) error
+	// Sets the title and adds the titling request's cost, leaving the token
+	// counters to the coding requests whose context size they measure.
+	UpdateSessionTitleAndCost(ctx context.Context, arg UpdateSessionTitleAndCostParams) error
 }
 
 var _ Querier = (*Queries)(nil)
