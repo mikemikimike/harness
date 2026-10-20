@@ -49,13 +49,13 @@ type SessionItem struct {
 	m                fuzzy.Match
 	cache            map[int]string
 	updateTitleInput textinput.Model
-	// promoteOnSpace reports whether the current title is still shown only
-	// as a ghost placeholder. While set, a leading space keeps the title by
-	// promoting it to an editable value; typing any other character simply
-	// replaces the ghost with the typed text.
-	promoteOnSpace bool
-	focused        bool
-	hideInfo       bool
+	// titleKeepable reports whether the rename input is still untouched,
+	// with the current title shown only as a ghost placeholder. Until the
+	// first keystroke, the keep-title binding promotes the title to an
+	// editable value; anything else replaces the ghost with what is typed.
+	titleKeepable bool
+	focused       bool
+	hideInfo      bool
 }
 
 // Finished implements list.Item. Session items are render-stable
@@ -108,24 +108,31 @@ func (s *SessionItem) InputValue() string {
 	return s.updateTitleInput.Value()
 }
 
-// HandleInput forwards input message to the update title input
-func (s *SessionItem) HandleInput(msg tea.Msg) tea.Cmd {
-	keyMsg, ok := msg.(tea.KeyPressMsg)
-	if s.promoteOnSpace {
-		s.promoteOnSpace = false
-		// A leading space keeps the ghost title by promoting it to an
-		// editable value without inserting the space. Anything else simply
-		// types over the ghost title, which is still empty at this point.
-		if ok && keyMsg.Text == " " && s.Title != "" {
-			s.updateTitleInput.SetValue(s.Title)
-			if s.Versioned != nil {
-				s.Bump()
-			}
-			return nil
-		}
+// CanKeepTitle reports whether [SessionItem.KeepTitle] still applies: the
+// rename input is untouched and there is a current title to keep.
+func (s *SessionItem) CanKeepTitle() bool {
+	return s.titleKeepable && s.Title != ""
+}
+
+// KeepTitle promotes the ghost title to the editable value of the rename
+// input.
+func (s *SessionItem) KeepTitle() {
+	s.titleKeepable = false
+	s.updateTitleInput.SetValue(s.Title)
+	if s.Versioned != nil {
+		s.Bump()
 	}
+}
+
+// HandleInput forwards msg to the update title input and returns the
+// command the input asks for. The first keystroke, or any input that
+// fills the field, ends the window in which the title can be kept.
+func (s *SessionItem) HandleInput(msg tea.Msg) tea.Cmd {
 	var cmd tea.Cmd
 	s.updateTitleInput, cmd = s.updateTitleInput.Update(msg)
+	if _, ok := msg.(tea.KeyPressMsg); ok || s.updateTitleInput.Value() != "" {
+		s.titleKeepable = false
+	}
 	if s.Versioned != nil {
 		s.Bump()
 	}
@@ -295,9 +302,9 @@ func sessionItems(t *styles.Styles, mode sessionsMode, sessions ...session.Sessi
 			inputStyle.Focused.Placeholder = t.Dialog.Sessions.RenamingPlaceholder
 			item.updateTitleInput.SetStyles(inputStyle)
 			// The current title starts out as a ghost placeholder. Typing
-			// any character replaces it; a leading space keeps it by
-			// promoting it to an editable value (see HandleInput).
-			item.promoteOnSpace = true
+			// any character replaces it; the keep-title binding keeps it
+			// by promoting it to an editable value (see KeepTitle).
+			item.titleKeepable = true
 			item.updateTitleInput.Focus()
 		}
 		items[i] = item

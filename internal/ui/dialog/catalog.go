@@ -3,7 +3,6 @@ package dialog
 import (
 	"os"
 
-	tea "charm.land/bubbletea/v2"
 	"github.com/stubbedev/harness/internal/commands"
 	"github.com/stubbedev/harness/internal/config"
 	"github.com/stubbedev/harness/internal/ui/common"
@@ -232,7 +231,7 @@ func (c *Catalog) defaultCommands() []*CommandItem {
 
 	commands = append(
 		commands,
-		NewCommandItem(c.com.Styles, "quit", "Quit", tea.QuitMsg{}).WithShortcut(km.Quit).WithAliases("exit"),
+		NewCommandItem(c.com.Styles, "quit", "Quit", ActionQuit{}).WithShortcut(km.Quit).WithAliases("exit"),
 	)
 
 	return commands

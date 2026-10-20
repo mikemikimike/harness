@@ -139,14 +139,10 @@ func (s *Session) HandleMsg(msg tea.Msg) Action {
 			case key.Matches(msg, s.keyMap.CancelRename):
 				s.sessionsMode = sessionsModeNormal
 				s.list.SetItems(sessionItems(s.com.Styles, sessionsModeNormal, s.sessions...)...)
+			case key.Matches(msg, s.keyMap.KeepTitle) && s.canKeepTitle():
+				s.selectedSessionItem().KeepTitle()
 			default:
-				item := s.list.SelectedItem()
-				if item == nil {
-					return nil
-				}
-				if sessionItem, ok := item.(*SessionItem); ok {
-					return sessionItem.HandleInput(msg)
-				}
+				return s.handleRenameInput(msg)
 			}
 		default:
 			switch {
@@ -187,8 +183,30 @@ func (s *Session) HandleMsg(msg tea.Msg) Action {
 		}
 	case tea.MouseClickMsg:
 		return s.handleMouseClick(msg)
+	default:
+		if s.sessionsMode == sessionsModeUpdating {
+			return s.handleRenameInput(msg)
+		}
 	}
 	return nil
+}
+
+// handleRenameInput forwards msg to the rename input of the selected
+// session. Pastes and the messages the input's own commands produce
+// arrive here as well as keystrokes, so the input sees all of them.
+func (s *Session) handleRenameInput(msg tea.Msg) Action {
+	item := s.selectedSessionItem()
+	if item == nil {
+		return nil
+	}
+	return ActionCmd{item.HandleInput(msg)}
+}
+
+// canKeepTitle reports whether the keep-title binding currently applies
+// to the selected session's rename input.
+func (s *Session) canKeepTitle() bool {
+	item := s.selectedSessionItem()
+	return item != nil && item.CanKeepTitle()
 }
 
 func (s *Session) handleMouseClick(msg tea.MouseClickMsg) Action {
@@ -428,6 +446,16 @@ func (s *Session) isCurrentSessionBusy() bool {
 	return s.com.Workspace.AgentIsSessionBusy(sessionItem.ID())
 }
 
+// renameBindings returns the bindings routed in rename mode. The keep-title
+// binding is listed only while it still applies.
+func (s *Session) renameBindings() []key.Binding {
+	bindings := []key.Binding{s.keyMap.CancelRename}
+	if s.canKeepTitle() {
+		bindings = append(bindings, s.keyMap.KeepTitle)
+	}
+	return append(bindings, s.keyMap.ConfirmRename)
+}
+
 // ShortHelp implements [help.KeyMap].
 func (s *Session) ShortHelp() []key.Binding {
 	switch s.sessionsMode {
@@ -437,11 +465,7 @@ func (s *Session) ShortHelp() []key.Binding {
 			s.keyMap.CancelDelete,
 		}
 	case sessionsModeUpdating:
-		return []key.Binding{
-			s.keyMap.CancelRename,
-			s.keyMap.KeepTitle,
-			s.keyMap.ConfirmRename,
-		}
+		return s.renameBindings()
 	default:
 		return []key.Binding{
 			s.keyMap.UpDown,
@@ -471,11 +495,7 @@ func (s *Session) FullHelp() [][]key.Binding {
 			s.keyMap.CancelDelete,
 		}
 	case sessionsModeUpdating:
-		slice = []key.Binding{
-			s.keyMap.CancelRename,
-			s.keyMap.KeepTitle,
-			s.keyMap.ConfirmRename,
-		}
+		slice = s.renameBindings()
 	default:
 	}
 	for i := 0; i < len(slice); i += 4 {

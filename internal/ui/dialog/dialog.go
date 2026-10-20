@@ -44,7 +44,9 @@ func CloseKey() key.Binding {
 }
 
 // Action represents an action taken in a dialog after handling a message.
-type Action any
+// The set is closed to this package's Action types, so a raw [tea.Cmd] or
+// [tea.Msg] cannot pass as one: a command travels in an [ActionCmd].
+type Action interface{ isAction() }
 
 // ID identifies a dialog kind. Every dialog declares its own as a
 // package constant, so a misspelled ID is a compile error rather than a
@@ -55,8 +57,8 @@ type ID string
 type Dialog interface {
 	// ID returns the unique identifier of the dialog.
 	ID() ID
-	// HandleMsg processes a message and returns an action. An [Action] can be
-	// anything and the caller is responsible for handling it appropriately.
+	// HandleMsg processes a message and returns the [Action] the caller
+	// should carry out, or nil.
 	HandleMsg(msg tea.Msg) Action
 	// Draw draws the dialog onto the provided screen within the specified area
 	// and returns the desired cursor position on the screen.
@@ -312,8 +314,8 @@ func (d *Overlay) BringToFront(dialogID ID) {
 	}
 }
 
-// Update handles dialog updates.
-func (d *Overlay) Update(msg tea.Msg) tea.Msg {
+// Update routes msg to the front dialog and returns the [Action] it asks for.
+func (d *Overlay) Update(msg tea.Msg) Action {
 	if len(d.dialogs) == 0 {
 		return nil
 	}

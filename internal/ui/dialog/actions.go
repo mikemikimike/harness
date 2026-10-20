@@ -16,7 +16,7 @@ import (
 type ActionClose struct{}
 
 // ActionQuit is a message to quit the application.
-type ActionQuit = tea.QuitMsg
+type ActionQuit struct{}
 
 // ActionOpenDialog is a message to open a dialog.
 type ActionOpenDialog struct {
@@ -278,3 +278,135 @@ type ActionCmd struct {
 type ActionRun struct {
 	Action Action
 }
+
+// isAction marks ActionClose as an [Action].
+func (ActionClose) isAction() {}
+
+// isAction marks ActionQuit as an [Action].
+func (ActionQuit) isAction() {}
+
+// isAction marks ActionOpenDialog as an [Action].
+func (ActionOpenDialog) isAction() {}
+
+// isAction marks ActionSelectSession as an [Action].
+func (ActionSelectSession) isAction() {}
+
+// isAction marks ActionSelectModel as an [Action].
+func (ActionSelectModel) isAction() {}
+
+// isAction marks ActionNewSession as an [Action].
+func (ActionNewSession) isAction() {}
+
+// isAction marks ActionToggleHelp as an [Action].
+func (ActionToggleHelp) isAction() {}
+
+// isAction marks ActionToggleThinking as an [Action].
+func (ActionToggleThinking) isAction() {}
+
+// isAction marks ActionExternalEditor as an [Action].
+func (ActionExternalEditor) isAction() {}
+
+// isAction marks ActionSelectNotificationStyle as an [Action].
+func (ActionSelectNotificationStyle) isAction() {}
+
+// isAction marks ActionToggleMouseSupport as an [Action].
+func (ActionToggleMouseSupport) isAction() {}
+
+// isAction marks ActionInitializeProject as an [Action].
+func (ActionInitializeProject) isAction() {}
+
+// isAction marks ActionSummarize as an [Action].
+func (ActionSummarize) isAction() {}
+
+// isAction marks ActionCompact as an [Action].
+func (ActionCompact) isAction() {}
+
+// isAction marks ActionSetGoal as an [Action].
+func (ActionSetGoal) isAction() {}
+
+// isAction marks ActionClearGoal as an [Action].
+func (ActionClearGoal) isAction() {}
+
+// isAction marks ActionSaveSummary as an [Action].
+func (ActionSaveSummary) isAction() {}
+
+// isAction marks ActionExportConversation as an [Action].
+func (ActionExportConversation) isAction() {}
+
+// isAction marks ActionSelectReasoningEffort as an [Action].
+func (ActionSelectReasoningEffort) isAction() {}
+
+// isAction marks ActionPreviewTheme as an [Action].
+func (ActionPreviewTheme) isAction() {}
+
+// isAction marks ActionSelectTheme as an [Action].
+func (ActionSelectTheme) isAction() {}
+
+// isAction marks ActionRunCustomCommand as an [Action].
+func (ActionRunCustomCommand) isAction() {}
+
+// isAction marks ActionRunMCPPrompt as an [Action].
+func (ActionRunMCPPrompt) isAction() {}
+
+// isAction marks ActionInvoke as an [Action].
+func (ActionInvoke) isAction() {}
+
+// isAction marks ActionInsertInvocation as an [Action].
+func (ActionInsertInvocation) isAction() {}
+
+// isAction marks ActionOpenArguments as an [Action].
+func (ActionOpenArguments) isAction() {}
+
+// isAction marks ActionMCPAuthStarted as an [Action].
+func (ActionMCPAuthStarted) isAction() {}
+
+// isAction marks ActionMCPAuthComplete as an [Action].
+func (ActionMCPAuthComplete) isAction() {}
+
+// isAction marks ActionMCPAuthErrored as an [Action].
+func (ActionMCPAuthErrored) isAction() {}
+
+// isAction marks ActionChangeAPIKeyState as an [Action].
+func (ActionChangeAPIKeyState) isAction() {}
+
+// isAction marks ActionInitiateOAuth as an [Action].
+func (ActionInitiateOAuth) isAction() {}
+
+// isAction marks ActionCompleteOAuth as an [Action].
+func (ActionCompleteOAuth) isAction() {}
+
+// isAction marks ActionOAuthErrored as an [Action].
+func (ActionOAuthErrored) isAction() {}
+
+// isAction marks ActionLoadSubagentSession as an [Action].
+func (ActionLoadSubagentSession) isAction() {}
+
+// isAction marks ActionCmd as an [Action].
+func (ActionCmd) isAction() {}
+
+// isAction marks ActionRun as an [Action].
+func (ActionRun) isAction() {}
+
+// isAction marks ActionLSPRestart as an [Action].
+func (ActionLSPRestart) isAction() {}
+
+// isAction marks ActionLSPSetSessionDisabled as an [Action].
+func (ActionLSPSetSessionDisabled) isAction() {}
+
+// isAction marks ActionMCPReconnect as an [Action].
+func (ActionMCPReconnect) isAction() {}
+
+// isAction marks ActionMCPDisableForSession as an [Action].
+func (ActionMCPDisableForSession) isAction() {}
+
+// isAction marks ActionOpenMCPAuth as an [Action].
+func (ActionOpenMCPAuth) isAction() {}
+
+// isAction marks ActionMentionSelected as an [Action].
+func (ActionMentionSelected) isAction() {}
+
+// isAction marks ActionMentionCancelled as an [Action].
+func (ActionMentionCancelled) isAction() {}
+
+// isAction marks ActionRewindConfirmed as an [Action].
+func (ActionRewindConfirmed) isAction() {}

@@ -181,7 +181,7 @@ func (m *Models) HandleMsg(msg tea.Msg) Action {
 				m.modelType = ModelTypeLarge
 			}
 			if err := m.setProviderItems(); err != nil {
-				return util.ReportError(err)
+				return ActionCmd{util.ReportError(err)}
 			}
 		default:
 			cmd, _ := filterInput(&m.input, msg, func(query string) {
