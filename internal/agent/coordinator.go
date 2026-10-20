@@ -599,7 +599,7 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		reasoningEffort != "" &&
 		slices.Contains(model.CatalogCfg.ReasoningLevels, reasoningEffort)
 
-	switch providerOptionsFamily(providerCfg.Type, model.CatalogCfg.ID) {
+	switch wireFamily(providerCfg, model.CatalogCfg.ID) {
 	case openai.Name, azure.Name:
 		_, hasReasoningEffort := mergedOptions["reasoning_effort"]
 		if !hasReasoningEffort && shouldSetEffort {
@@ -703,6 +703,13 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		}
 
 	case openaicompat.Name:
+		if topKInExtraBody(providerCfg) {
+			if parsed := knownCustomProviderOptions(mergedOptions, model, providerCfg, reasoningEffort, shouldSetEffort); parsed != nil {
+				options[openaicompat.Name] = parsed
+			}
+			break
+		}
+
 		extraBody := make(map[string]any)
 
 		_, hasReasoningEffort := mergedOptions["reasoning_effort"]
@@ -785,58 +792,68 @@ func getProviderOptions(model Model, providerCfg config.ProviderConfig) fantasy.
 		}
 
 	default:
-		// Known custom providers (litellm, llamacpp, lmstudio, ollama,
-		// omlx) are openai-compat under the hood.
-		if discover.IsKnownCustomProvider(string(providerCfg.Type)) {
-			// Set "top_k" under "extra_body", as it is not part of the OpenAI protocol
-			// and will be explicitly omitted by Fantasy downstream.
-			topK := cmp.Or(model.ModelCfg.TopK, model.CatalogCfg.Options.TopK)
-			if topK != nil {
-				extraBody, hasExtraBody := mergedOptions["extra_body"].(map[string]any)
-				if !hasExtraBody {
-					extraBody = make(map[string]any)
-					mergedOptions["extra_body"] = extraBody
-				}
-				if _, hasTopK := extraBody["top_k"]; !hasTopK {
-					extraBody["top_k"] = *topK
-				}
-			}
-
-			_, hasReasoningEffort := mergedOptions["reasoning_effort"]
-			if !hasReasoningEffort && shouldSetEffort {
-				mergedOptions["reasoning_effort"] = reasoningEffort
-			}
-
-			parsed, err := openaicompat.ParseOptions(mergedOptions)
-			if err == nil {
-				options[openaicompat.Name] = parsed
-			} else {
-				if topK != nil {
-					slog.Warn(
-						"Failed to parse provider_options, falling back to top_k only",
-						"provider", providerCfg.ID,
-						"error", err,
-					)
-
-					fallbackMergeOptions := map[string]any{
-						"extra_body": map[string]any{"top_k": *topK},
-					}
-					parsed, err := openaicompat.ParseOptions(fallbackMergeOptions)
-					if err == nil {
-						options[openaicompat.Name] = parsed
-					} else {
-						slog.Warn(
-							"Failed to parse fallback provider options, this should never happen",
-							"provider", providerCfg.ID,
-							"error", err,
-						)
-					}
-				}
-			}
-		}
+		return options
 	}
 
 	return options
+}
+
+// topKInExtraBody reports whether calls to providerCfg carry top_k in the
+// extra_body of their provider options rather than on the call. The known
+// custom providers (litellm, llamacpp, lmstudio, ollama, omlx) take it
+// there: it is not part of the OpenAI protocol, and Fantasy omits it from
+// the request otherwise.
+func topKInExtraBody(providerCfg config.ProviderConfig) bool {
+	return discover.IsKnownCustomProvider(string(providerCfg.Type))
+}
+
+// knownCustomProviderOptions builds the openai-compat options for a known
+// custom provider from the merged provider_options: top_k goes under
+// extra_body (see topKInExtraBody) and the reasoning effort under
+// reasoning_effort. When the merged options do not parse it falls back to
+// top_k alone, and returns nil when there is nothing to send.
+func knownCustomProviderOptions(mergedOptions map[string]any, model Model, providerCfg config.ProviderConfig, reasoningEffort string, shouldSetEffort bool) *openaicompat.ProviderOptions {
+	topK := cmp.Or(model.ModelCfg.TopK, model.CatalogCfg.Options.TopK)
+	if topK != nil {
+		extraBody, hasExtraBody := mergedOptions["extra_body"].(map[string]any)
+		if !hasExtraBody {
+			extraBody = make(map[string]any)
+			mergedOptions["extra_body"] = extraBody
+		}
+		if _, hasTopK := extraBody["top_k"]; !hasTopK {
+			extraBody["top_k"] = *topK
+		}
+	}
+
+	_, hasReasoningEffort := mergedOptions["reasoning_effort"]
+	if !hasReasoningEffort && shouldSetEffort {
+		mergedOptions["reasoning_effort"] = reasoningEffort
+	}
+
+	parsed, err := openaicompat.ParseOptions(mergedOptions)
+	if err == nil {
+		return parsed
+	}
+	if topK == nil {
+		return nil
+	}
+	slog.Warn(
+		"Failed to parse provider_options, falling back to top_k only",
+		"provider", providerCfg.ID,
+		"error", err,
+	)
+	parsed, err = openaicompat.ParseOptions(map[string]any{
+		"extra_body": map[string]any{"top_k": *topK},
+	})
+	if err != nil {
+		slog.Warn(
+			"Failed to parse fallback provider options, this should never happen",
+			"provider", providerCfg.ID,
+			"error", err,
+		)
+		return nil
+	}
+	return parsed
 }
 
 // newModelCall returns a call carrying everything the model and its
@@ -979,7 +996,7 @@ func (c *coordinator) buildModel(ctx context.Context, providerCfg config.Provide
 	// providers fail instead of blocking a session forever. The wrapper is
 	// applied per request, so retries get a fresh budget each attempt.
 	lm = newRequestTimeoutModel(lm, c.cfg.Config().Options.GetRequestTimeout())
-	return Model{Model: lm, CatalogCfg: catalogModel, ModelCfg: selModel, FlatRate: providerCfg.FlatRate}, nil
+	return Model{Model: lm, CatalogCfg: catalogModel, ModelCfg: selModel, FlatRate: providerCfg.FlatRate, Wire: wireFamily(providerCfg, modelID)}, nil
 }
 
 // resolveModelByID finds the provider that offers modelID and builds a Model
@@ -1507,18 +1524,43 @@ func (c *coordinator) buildGoogleVertexProvider(headers map[string]string, optio
 	return google.New(opts...)
 }
 
-// providerOptionsFamily names the provider whose option format a call to
-// modelID on a provider of type t takes. It is the type itself except for
-// Vertex AI, which fantasy serves through its google provider, handing
-// Claude models on to its anthropic provider.
-func providerOptionsFamily(t catalog.Type, modelID string) catalog.Type {
-	if t != catalog.TypeVertexAI {
+// buildAnthropicVertexProvider builds the anthropic provider for Claude
+// models served by Vertex AI, authenticated with the application default
+// credentials for the project and location in options.
+func (c *coordinator) buildAnthropicVertexProvider(headers map[string]string, options map[string]string, disableHTTP2 bool) (fantasy.Provider, error) {
+	opts := []anthropic.Option{
+		anthropic.WithVertex(options["project"], options["location"]),
+		anthropic.WithHTTPClient(log.NewProviderHTTPClient(c.cfg.Config().Options.Debug, disableHTTP2)),
+	}
+	if len(headers) > 0 {
+		opts = append(opts, anthropic.WithHeaders(headers))
+	}
+	return anthropic.New(opts...)
+}
+
+// wireFamily names the protocol a call to modelID on providerCfg is sent
+// in. buildProvider builds the fantasy provider for it and
+// getProviderOptions writes the option format it reads, so the two always
+// agree. It is the provider's type except where the provider serves the
+// model over another protocol: models catalog.UsesMessagesAPI names go
+// over the Anthropic Messages API, Vertex AI serves Claude models in the
+// Anthropic format and the rest in Google's, and the known custom
+// providers (litellm, llamacpp, lmstudio, ollama, omlx) speak
+// OpenAI-compat.
+func wireFamily(providerCfg config.ProviderConfig, modelID string) catalog.Type {
+	switch t := providerCfg.Type; {
+	case catalog.UsesMessagesAPI(catalog.InferenceProvider(providerCfg.ID), modelID):
+		return catalog.TypeAnthropic
+	case t == catalog.TypeVertexAI:
+		if strings.Contains(modelID, "anthropic") || strings.Contains(modelID, "claude") {
+			return catalog.TypeAnthropic
+		}
+		return catalog.TypeGoogle
+	case discover.IsKnownCustomProvider(string(t)):
+		return catalog.TypeOpenAICompat
+	default:
 		return t
 	}
-	if strings.Contains(modelID, "anthropic") || strings.Contains(modelID, "claude") {
-		return anthropic.Name
-	}
-	return google.Name
 }
 
 func (c *coordinator) isAnthropicThinking(model config.SelectedModel) bool {
@@ -1563,8 +1605,10 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 		headers = make(map[string]string)
 	}
 
+	wire := wireFamily(providerCfg, model.Model)
+
 	// handle special headers for anthropic
-	if providerCfg.Type == anthropic.Name && c.isAnthropicThinking(model) {
+	if wire == catalog.TypeAnthropic && c.isAnthropicThinking(model) {
 		if v, ok := headers["anthropic-beta"]; ok {
 			headers["anthropic-beta"] = v + ",interleaved-thinking-2025-05-14"
 		} else {
@@ -1575,15 +1619,19 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 	apiKey, _ := c.cfg.Resolve(providerCfg.APIKey)
 	baseURL, _ := c.cfg.Resolve(providerCfg.BaseURL)
 
-	if catalog.UsesMessagesAPI(catalog.InferenceProvider(providerCfg.ID), model.Model) {
-		baseURL = strings.TrimSuffix(baseURL, "/v1")
-		return c.buildAnthropicProvider(baseURL, apiKey, headers, providerCfg.ID, providerCfg.DisableHTTP2)
-	}
-
-	switch providerCfg.Type {
+	switch wire {
 	case openai.Name:
 		return c.buildOpenaiProvider(baseURL, apiKey, headers, providerCfg.DisableHTTP2)
 	case anthropic.Name:
+		switch providerCfg.Type {
+		case catalog.TypeAnthropic:
+		case catalog.TypeVertexAI:
+			return c.buildAnthropicVertexProvider(headers, providerCfg.ExtraParams, providerCfg.DisableHTTP2)
+		default:
+			// A base URL configured for Chat Completions ends in /v1,
+			// which the Messages API path already carries.
+			baseURL = strings.TrimSuffix(baseURL, "/v1")
+		}
 		return c.buildAnthropicProvider(baseURL, apiKey, headers, providerCfg.ID, providerCfg.DisableHTTP2)
 	case openrouter.Name:
 		return c.buildOpenrouterProvider(baseURL, apiKey, headers, providerCfg.DisableHTTP2)
@@ -1594,9 +1642,10 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 	case bedrock.Name:
 		return c.buildBedrockProvider(apiKey, headers, providerCfg.DisableHTTP2)
 	case google.Name:
+		if providerCfg.Type == catalog.TypeVertexAI {
+			return c.buildGoogleVertexProvider(headers, providerCfg.ExtraParams, providerCfg.DisableHTTP2)
+		}
 		return c.buildGoogleProvider(baseURL, apiKey, headers, providerCfg.DisableHTTP2)
-	case catalog.TypeVertexAI:
-		return c.buildGoogleVertexProvider(headers, providerCfg.ExtraParams, providerCfg.DisableHTTP2)
 	case openaicompat.Name:
 		if catalog.IsZAI(providerCfg.ID) {
 			// Clone before adding: providerCfg is a copy, but its map is
@@ -1611,11 +1660,6 @@ func (c *coordinator) buildProvider(providerCfg config.ProviderConfig, model con
 		}
 		return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.ID, isSubAgent, providerCfg.DisableHTTP2)
 	default:
-		// Known custom providers (litellm, llamacpp, lmstudio, ollama,
-		// omlx) are openai-compat under the hood.
-		if discover.IsKnownCustomProvider(string(providerCfg.Type)) {
-			return c.buildOpenaiCompatProvider(baseURL, apiKey, headers, providerCfg.ExtraBody, providerCfg.ID, isSubAgent, providerCfg.DisableHTTP2)
-		}
 		return nil, fmt.Errorf("provider type not supported: %q", providerCfg.Type)
 	}
 }
@@ -2313,12 +2357,12 @@ type subAgentParams struct {
 	SessionSetup func(sessionID string)
 }
 
-// callTopK returns topK for use on fantasy.Call.TopK, suppressing it for
-// known custom providers: getProviderOptions already carries top_k for
-// them via extra_body, and passing it here too makes Fantasy emit a
-// spurious "top_k unsupported" warning for every turn.
+// callTopK returns topK for use on fantasy.Call.TopK, suppressing it where
+// topKInExtraBody puts it in the provider options instead: passing it here
+// too makes Fantasy emit a spurious "top_k unsupported" warning for every
+// turn.
 func callTopK(providerCfg config.ProviderConfig, topK *int64) *int64 {
-	if discover.IsKnownCustomProvider(string(providerCfg.Type)) {
+	if topKInExtraBody(providerCfg) {
 		return nil
 	}
 	return topK

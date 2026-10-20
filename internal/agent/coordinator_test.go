@@ -16,7 +16,6 @@ import (
 	"charm.land/fantasy"
 	"charm.land/fantasy/providers/anthropic"
 	"charm.land/fantasy/providers/bedrock"
-	"charm.land/fantasy/providers/google"
 	"charm.land/fantasy/providers/openaicompat"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1628,12 +1627,13 @@ func TestBuildModelAppliesRequestTimeout(t *testing.T) {
 	require.Equal(t, config.DefaultRequestTimeout, wrapped.timeout)
 }
 
-// TestProviderOptionsFamilyVertex pins Vertex AI calls to the option format
-// of the provider fantasy actually serves them with.
-func TestProviderOptionsFamilyVertex(t *testing.T) {
+// TestWireFamilyVertex pins Vertex AI calls to the protocol each model is
+// served over.
+func TestWireFamilyVertex(t *testing.T) {
 	t.Parallel()
 
-	require.Equal(t, catalog.Type(google.Name), providerOptionsFamily(catalog.TypeVertexAI, "gemini-2.5-pro"))
-	require.Equal(t, catalog.Type(anthropic.Name), providerOptionsFamily(catalog.TypeVertexAI, "claude-sonnet-4@20250514"))
-	require.Equal(t, catalog.TypeOpenAI, providerOptionsFamily(catalog.TypeOpenAI, "gpt-5"))
+	vertex := config.ProviderConfig{ID: "vertexai", Type: catalog.TypeVertexAI}
+	require.Equal(t, catalog.TypeGoogle, wireFamily(vertex, "gemini-2.5-pro"))
+	require.Equal(t, catalog.TypeAnthropic, wireFamily(vertex, "claude-sonnet-4@20250514"))
+	require.Equal(t, catalog.TypeOpenAI, wireFamily(config.ProviderConfig{ID: "openai", Type: catalog.TypeOpenAI}, "gpt-5"))
 }

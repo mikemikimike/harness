@@ -207,6 +207,8 @@ type Model struct {
 	CatalogCfg catalog.Model
 	ModelCfg   config.SelectedModel
 	FlatRate   bool
+	// Wire is the protocol the model is called over (see wireFamily).
+	Wire catalog.Type
 }
 
 // activeCancel wraps a context.CancelFunc with a unique pointer identity.
@@ -3062,18 +3064,15 @@ func (a *sessionAgent) convertToToolResult(result fantasy.ToolResultContent) mes
 //  2. Inject a user message immediately after with the image as a file attachment
 //  3. This maintains the tool execution flow while working around API limitations
 //
-// Anthropic and Bedrock support images natively in tool results, so we skip
-// this workaround for them.
+// The Anthropic and Bedrock wire protocols support images natively in tool
+// results, so we skip this workaround for models called over them.
 //
 // Example transformation:
 //
 //	BEFORE: [tool result: image data]
 //	AFTER:  [tool result: "Image loaded - see attached"], [user: image attachment]
 func (a *sessionAgent) workaroundProviderMediaLimitations(messages []fantasy.Message, largeModel Model) []fantasy.Message {
-	providerSupportsMedia := largeModel.ModelCfg.Provider == string(catalog.InferenceProviderAnthropic) ||
-		largeModel.ModelCfg.Provider == string(catalog.InferenceProviderBedrock)
-
-	if providerSupportsMedia {
+	if largeModel.Wire == catalog.TypeAnthropic || largeModel.Wire == catalog.TypeBedrock {
 		return messages
 	}
 

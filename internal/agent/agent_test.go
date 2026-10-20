@@ -1151,6 +1151,7 @@ func TestWorkaroundProviderMediaLimitations_AnthropicProvider(t *testing.T) {
 		CatalogCfg: catalog.Model{
 			SupportsImages: true,
 		},
+		Wire: catalog.TypeAnthropic,
 	}
 
 	result := agent.workaroundProviderMediaLimitations(messages, largeModel)

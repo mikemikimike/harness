@@ -33,8 +33,9 @@ import (
 // effort between requests leaves the prompt cache intact. An explicit
 // level is honoured when the model supports it and it is weaker than the
 // configured effort, whatever the cache costs: the user chose it. An
-// explicit level the model does not have falls back to auto.
-func toolStepEffort(setting string, model Model, providerType catalog.Type) string {
+// explicit level the model does not have falls back to auto. wire is the
+// protocol the model is called over (see wireFamily).
+func toolStepEffort(setting string, model Model, wire catalog.Type) string {
 	effort := effectiveReasoningEffort(model)
 	if effort == "" || setting == config.ToolStepReasoningEffortSame {
 		return ""
@@ -46,7 +47,7 @@ func toolStepEffort(setting string, model Model, providerType catalog.Type) stri
 		}
 		return ""
 	}
-	if effortChangeInvalidatesCache(providerType, model.CatalogCfg.ID) {
+	if effortChangeInvalidatesCache(wire, model.CatalogCfg.ID) {
 		return ""
 	}
 	return catalog.StepDownReasoningLevel(levels, effort)
@@ -61,14 +62,14 @@ func toolStepEffort(setting string, model Model, providerType catalog.Type) stri
 // conversation into the cache twice a turn (once for the step that
 // answers the user, once for the first tool step after it). That holds
 // for Claude wherever it is served, so Claude model ids are matched as
-// well as the Anthropic and Bedrock option families. OpenAI's reasoning
+// well as the Anthropic and Bedrock wire families. OpenAI's reasoning
 // models take the effort in the system header of their prompt format
 // (the open harmony format of gpt-oss shows it), ahead of everything
 // cached, so OpenAI models are excluded the same way. Other providers
 // render a thinking switch at the end of the prompt or outside it, where
 // it costs nothing.
-func effortChangeInvalidatesCache(providerType catalog.Type, modelID string) bool {
-	if slices.Contains([]catalog.Type{anthropic.Name, bedrock.Name, openai.Name, azure.Name}, providerOptionsFamily(providerType, modelID)) {
+func effortChangeInvalidatesCache(wire catalog.Type, modelID string) bool {
+	if slices.Contains([]catalog.Type{anthropic.Name, bedrock.Name, openai.Name, azure.Name}, wire) {
 		return true
 	}
 	id := strings.ToLower(modelID)
@@ -91,7 +92,7 @@ func effortChangeInvalidatesCache(providerType catalog.Type, modelID string) boo
 // there as it does for the call, and the two then come out identical,
 // which is reported as nil.
 func toolStepProviderOptions(model Model, providerCfg config.ProviderConfig, setting string) fantasy.ProviderOptions {
-	effort := toolStepEffort(setting, model, providerCfg.Type)
+	effort := toolStepEffort(setting, model, wireFamily(providerCfg, model.CatalogCfg.ID))
 	if effort == "" {
 		return nil
 	}
