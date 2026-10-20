@@ -11,6 +11,11 @@ package model
 // creates when the queue drains — so the swap from placeholder to real
 // message happens in one update pass and is invisible. Prompts queued
 // from another client join the same entry through the reconcile.
+//
+// The queue belongs to the main session, so the placeholder paints only
+// into the main transcript: while an agent's session is on screen the
+// prompts are tracked but not drawn, and the main transcript re-adds
+// the placeholder when it comes back.
 
 import (
 	"fmt"
@@ -27,14 +32,20 @@ func (m *UI) appendQueuedPrompt(text string) {
 	if text == "" || m.chat == nil {
 		return
 	}
+	m.queuedPromptsSession = m.currentSessionID()
 	m.queuedPrompts = append(m.queuedPrompts, text)
 	m.syncQueuedPromptItem()
 }
 
 // syncQueuedPromptItem aligns the single placeholder item with
 // m.queuedPrompts: it is created on the first queued prompt, re-textured
-// as more join, and dropped when the last one leaves.
+// as more join, and dropped when the last one leaves. It never touches
+// a transcript other than the main one of the session the prompts were
+// queued on.
 func (m *UI) syncQueuedPromptItem() {
+	if m.agentView.shown != "" || m.queuedPromptsSession != m.currentSessionID() {
+		return
+	}
 	if len(m.queuedPrompts) == 0 {
 		if m.queuedPromptItem != nil {
 			m.chat.RemoveMessage(m.queuedPromptItem.ID())
@@ -83,14 +94,19 @@ func (m *UI) reconcileQueuedPrompts(prompts []string) {
 	if m.chat == nil {
 		return
 	}
+	m.queuedPromptsSession = m.currentSessionID()
 	m.queuedPrompts = slices.Clone(prompts)
 	m.syncQueuedPromptItem()
 }
 
-// resetQueuedPrompts drops placeholder tracking when the transcript is
-// rebuilt from persisted messages (session switch or reload): the
-// rebuild replaces the list, so the placeholder simply ceases to exist.
-func (m *UI) resetQueuedPrompts() {
-	m.queuedPrompts = nil
+// resetQueuedPromptsUnlessFor runs when the transcript list is replaced:
+// the replacement drops the placeholder item, so it is forgotten, and
+// the queued prompts are dropped too unless they belong to sessionID,
+// the session whose main transcript is being rebuilt.
+func (m *UI) resetQueuedPromptsUnlessFor(sessionID string) {
 	m.queuedPromptItem = nil
+	if m.queuedPromptsSession != sessionID {
+		m.queuedPrompts = nil
+		m.queuedPromptsSession = sessionID
+	}
 }

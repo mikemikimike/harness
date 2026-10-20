@@ -6,6 +6,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stubbedev/harness/internal/message"
+	"github.com/stubbedev/harness/internal/pubsub"
+	"github.com/stubbedev/harness/internal/session"
 	"github.com/stubbedev/harness/internal/ui/chat"
 	"github.com/stubbedev/harness/internal/ui/styles"
 )
@@ -148,4 +150,103 @@ func TestQueuedPromptReconcileKeepsDuplicates(t *testing.T) {
 	assert.Equal(t,
 		"again"+message.QueuedPromptSeparator+"again",
 		item.(*chat.QueuedMessageItem).Text())
+}
+
+const queuedTestChild = "m1$$c1"
+
+func showAgentView(m *UI, childSessionID string) {
+	m.agentView.requested = childSessionID
+	_ = m.handleAgentTranscriptMsg(agentTranscriptMsg{
+		forSession:     m.session.ID,
+		childSessionID: childSessionID,
+		msgs: []message.Message{{
+			ID:        "child-prompt",
+			SessionID: childSessionID,
+			Role:      message.User,
+			Parts:     []message.ContentPart{message.TextContent{Text: "child prompt"}},
+		}},
+	})
+}
+
+func showMainView(m *UI, msgs ...message.Message) {
+	m.agentView.requested = ""
+	_ = m.handleAgentTranscriptMsg(agentTranscriptMsg{forSession: m.session.ID, msgs: msgs})
+}
+
+func hasQueuedPlaceholder(m *UI) bool {
+	return m.queuedPromptItem != nil && m.chat.MessageItem(m.queuedPromptItem.ID()) != nil
+}
+
+// TestQueuedPromptNeverPaintsIntoAgentView pins that the main session's
+// queued prompt is drawn only in the main transcript: a queue refresh
+// arriving while an agent's session is on screen must not add the
+// placeholder to the agent's transcript.
+func TestQueuedPromptNeverPaintsIntoAgentView(t *testing.T) {
+	pinTTLs(t)
+	m, _ := newQueuedTestUI()
+
+	_ = m.sendMessage("queued for main")
+	showAgentView(m, queuedTestChild)
+	showMainView(m)
+	showAgentView(m, queuedTestChild)
+
+	m.reconcileQueuedPrompts([]string{"queued for main", "from another client"})
+
+	assert.False(t, hasQueuedPlaceholder(m), "the agent transcript must not show the main session's queue")
+	assert.NotNil(t, m.chat.MessageItem("child-prompt"), "the agent transcript is on screen")
+	assert.Len(t, m.queuedPrompts, 2, "the queue is still tracked for the main transcript")
+}
+
+// TestQueuedPromptReturnsWithMainTranscript pins that leaving for an
+// agent's session and coming back keeps a still-queued prompt in the
+// main transcript instead of dropping it until the next refresh.
+func TestQueuedPromptReturnsWithMainTranscript(t *testing.T) {
+	pinTTLs(t)
+	m, _ := newQueuedTestUI()
+
+	_ = m.sendMessage("queued for main")
+	showAgentView(m, queuedTestChild)
+	showMainView(m)
+
+	require.True(t, hasQueuedPlaceholder(m), "the queued prompt comes back with the main transcript")
+	assert.Equal(t, "queued for main", m.queuedPromptItem.Text())
+}
+
+// TestQueuedPromptDrainedWhileAgentViewedIsNotRestored pins that a
+// queued prompt which became a real message while an agent was on
+// screen is consumed, so returning to main shows the message once and
+// no stale placeholder.
+func TestQueuedPromptDrainedWhileAgentViewedIsNotRestored(t *testing.T) {
+	pinTTLs(t)
+	m, _ := newQueuedTestUI()
+
+	_ = m.sendMessage("queued for main")
+	showAgentView(m, queuedTestChild)
+
+	drained := message.Message{
+		ID:        "real-1",
+		SessionID: "s1",
+		Role:      message.User,
+		Parts:     []message.ContentPart{message.TextContent{Text: "queued for main"}},
+	}
+	_, _ = m.Update(pubsub.Event[message.Message]{Type: pubsub.CreatedEvent, Payload: drained})
+	assert.Empty(t, m.queuedPrompts, "the drained prompt is consumed even off screen")
+
+	showMainView(m, drained)
+	assert.False(t, hasQueuedPlaceholder(m), "no stale placeholder next to the real message")
+	assert.NotNil(t, m.chat.MessageItem("real-1"))
+}
+
+// TestQueuedPromptsDroppedOnSessionSwitch pins that another session's
+// transcript never inherits the queue of the session left behind.
+func TestQueuedPromptsDroppedOnSessionSwitch(t *testing.T) {
+	pinTTLs(t)
+	m, _ := newQueuedTestUI()
+
+	_ = m.sendMessage("queued for s1")
+	m.session = &session.Session{ID: "s2"}
+	_ = m.setSessionMessages(nil)
+
+	assert.Empty(t, m.queuedPrompts)
+	assert.False(t, hasQueuedPlaceholder(m))
 }

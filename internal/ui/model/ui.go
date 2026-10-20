@@ -441,6 +441,9 @@ type UI struct {
 	queuedPromptItem *chat.QueuedMessageItem
 	queuedPrompts    []string
 	queuedPromptSeq  int
+	// queuedPromptsSession is the session queuedPrompts were queued on;
+	// the placeholder belongs to that session's main transcript only.
+	queuedPromptsSession string
 	// agentBusyCache memoizes the workspace busy
 	// probes (synchronous HTTP round-trips in client/server mode). Reads
 	// never probe; refreshes happen off-thread (see workspace_cache.go).
@@ -1118,6 +1121,8 @@ func (m *UI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case pubsub.CreatedEvent:
 			if showInTranscript {
 				cmds = append(cmds, m.appendSessionMessage(msg.Payload))
+			} else if isMain && msg.Payload.Role == message.User {
+				m.materializeQueuedPrompt(msg.Payload.Content().Text)
 			}
 			if isMain {
 				// A new message is a run boundary — a user prompt starting
@@ -1742,9 +1747,9 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 	m.agentView = agentViewRef{}
 	m.loadAgentTasks(msgPtrs, toolResultMap)
 
-	// The rebuilt list drops the old session's queued-prompt
-	// placeholders with it.
-	m.resetQueuedPrompts()
+	// The rebuilt list drops the placeholder item; the prompts survive
+	// only when the rebuild is the same session coming back on screen.
+	m.resetQueuedPromptsUnlessFor(m.currentSessionID())
 
 	// If the user switches between sessions while the agent is working we
 	// want to make sure the animations are shown. Gate on the agent actually
@@ -1763,6 +1768,7 @@ func (m *UI) setSessionMessages(msgs []message.Message) tea.Cmd {
 	if cmd := m.chat.SetMessages(sessionID, items...); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
+	m.syncQueuedPromptItem()
 	return tea.Sequence(cmds...)
 }
 

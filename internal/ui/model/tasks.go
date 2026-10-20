@@ -407,6 +407,7 @@ func (m *UI) setChildSessionMessages(childSessionID string, msgs []message.Messa
 	// A viewed agent is by definition working; keep the animation clock
 	// running so its in-flight tool spinners move.
 	m.chat.SetAnimationsAllowed(true)
+	m.resetQueuedPromptsUnlessFor(m.currentSessionID())
 	m.chat.SetMessages(childSessionID, items...)
 }
 
