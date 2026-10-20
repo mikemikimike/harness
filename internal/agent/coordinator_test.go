@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -1565,25 +1567,42 @@ func TestResolveModelByID_ModelNotFound(t *testing.T) {
 	require.Equal(t, 0, coord.subagentModelCache.Len())
 }
 
-type recordingDoer struct{ got http.Header }
+func TestBearerAnthropicProviderOmitsEnvironmentAPIKey(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "env-key")
 
-func (d *recordingDoer) Do(req *http.Request) (*http.Response, error) {
-	d.got = req.Header.Clone()
-	return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody}, nil
-}
+	captured := make(chan http.Header, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		captured <- r.Header.Clone()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":"msg","type":"message","role":"assistant","model":"m",`+
+			`"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn",`+
+			`"usage":{"input_tokens":1,"output_tokens":1}}`)
+	}))
+	t.Cleanup(server.Close)
 
-func TestBearerOnlyClientStripsAPIKeyHeader(t *testing.T) {
-	t.Parallel()
-	inner := &recordingDoer{}
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "https://example.invalid", nil)
-	require.NoError(t, err)
-	req.Header.Set("X-Api-Key", "env-key")
-	req.Header.Set("Authorization", "Bearer token")
-	resp, err := bearerOnlyClient{inner}.Do(req)
-	require.NoError(t, err)
-	require.NoError(t, resp.Body.Close())
-	require.Empty(t, inner.got.Get("X-Api-Key"))
-	require.Equal(t, "Bearer token", inner.got.Get("Authorization"))
+	for _, tc := range []struct {
+		name       string
+		providerID string
+		apiKey     string
+		wantAuth   string
+	}{
+		{name: "bearer key", providerID: "custom", apiKey: "Bearer token", wantAuth: "Bearer token"},
+		{name: "minimax", providerID: string(catalog.InferenceProviderMiniMax), apiKey: "mm-key", wantAuth: "Bearer mm-key"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			coord := newTestCoordinator(t, testEnv(t), tc.providerID, config.ProviderConfig{ID: tc.providerID})
+			provider, err := coord.buildAnthropicProvider(server.URL, tc.apiKey, map[string]string{}, tc.providerID, false)
+			require.NoError(t, err)
+			model, err := provider.LanguageModel(t.Context(), "m")
+			require.NoError(t, err)
+			_, err = model.Generate(t.Context(), fantasy.Call{Prompt: fantasy.Prompt{fantasy.NewUserMessage("hi")}})
+			require.NoError(t, err)
+
+			headers := <-captured
+			require.Empty(t, headers.Get("X-Api-Key"))
+			require.Equal(t, tc.wantAuth, headers.Get("Authorization"))
+		})
+	}
 }
 
 // TestBuildModelAppliesRequestTimeout pins the request_timeout wiring: every
