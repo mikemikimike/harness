@@ -59,9 +59,7 @@ func ContentCol(viewportCol int) int {
 }
 
 // Identifiable is an interface for items that can provide a unique identifier.
-type Identifiable interface {
-	ID() string
-}
+type Identifiable = list.Identifiable
 
 // Animatable is an interface for items that support animation. Items do
 // not schedule their own frames: the UI runs a single animation clock and

@@ -91,8 +91,8 @@ type serversDialog struct {
 	phase  serversPhase
 	// current is the server the detail phase shows.
 	current string
-	// listNames parallels the list-phase items, so a refresh can keep
-	// the selection on the same server after the entries reorder.
+	// listNames parallels the unfiltered list-phase items, so a selected
+	// row resolves to a server name.
 	listNames []string
 
 	keyMap struct {
@@ -146,8 +146,7 @@ func (d *serversDialog) confirmSelection() Action {
 	if d.phase == serversPhaseList {
 		if ci, ok := d.list.SelectedItem().(*CommandItem); ok && ci != nil && slices.Contains(d.listNames, ci.Title()) {
 			d.current = ci.Title()
-			d.phase = serversPhaseDetail
-			d.refreshDetail()
+			d.enterDetailPhase()
 		}
 		return nil
 	}
@@ -163,10 +162,25 @@ func (d *serversDialog) confirmSelection() Action {
 	return nil
 }
 
-// enterListPhase returns from a detail view to the server list.
+// enterDetailPhase opens the detail view of the current server with an
+// empty filter and the first row selected.
+func (d *serversDialog) enterDetailPhase() {
+	d.phase = serversPhaseDetail
+	clearListFilter(&d.input, d.list)
+	d.refreshDetail()
+	d.list.SetSelected(0)
+	d.list.ScrollToTop()
+}
+
+// enterListPhase returns from a detail view to the server list with an
+// empty filter and the server the detail view showed selected.
 func (d *serversDialog) enterListPhase() {
 	d.phase = serversPhaseList
+	clearListFilter(&d.input, d.list)
 	d.refreshServers()
+	if idx := slices.Index(d.listNames, d.current); idx >= 0 {
+		d.list.SetSelected(idx)
+	}
 }
 
 // refresh rebuilds whichever view is showing, for when fresh live
@@ -179,38 +193,26 @@ func (d *serversDialog) refresh() {
 	d.refreshServers()
 }
 
-// refreshServers rebuilds the server list, keeping the selection on
-// the same server when the entries reorder.
+// refreshServers rebuilds the server list. Rows are identified by
+// server name, so the list keeps the selection on the same server when
+// the entries reorder and keeps applying the filter being typed.
 func (d *serversDialog) refreshServers() {
-	keep := ""
-	if ci, ok := d.list.SelectedItem().(*CommandItem); ok && ci != nil {
-		keep = ci.Title()
-	}
-
 	d.listNames = d.source.entries()
 	items := make([]list.FilterableItem, len(d.listNames))
 	for i, name := range d.listNames {
-		items[i] = NewCommandItem(d.com.Styles, fmt.Sprintf("server_%d", i), name, "", nil).
+		items[i] = NewCommandItem(d.com.Styles, "server_"+name, name, "", nil).
 			WithDescription(d.source.statusText(name))
 	}
 	d.list.SetItems(items...)
-
-	selected := 0
-	if keep != "" && slices.Contains(d.listNames, keep) {
-		selected = slices.Index(d.listNames, keep)
-	} else if idx := d.list.Selected(); idx >= 0 && len(items) > 0 {
-		selected = min(idx, len(items)-1)
-	}
-	if len(items) > 0 {
-		d.list.SetSelected(selected)
+	if d.list.Selected() < 0 && d.list.Len() > 0 {
+		d.list.SetSelected(0)
 	}
 }
 
-// refreshDetail rebuilds the detail view of the current server.
+// refreshDetail rebuilds the detail view of the current server; the
+// list keeps the filter and the selected row across the rebuild.
 func (d *serversDialog) refreshDetail() {
 	d.list.SetItems(d.source.detailItems(d.current)...)
-	d.list.SetSelected(0)
-	d.list.ScrollToTop()
 }
 
 // Draw implements [Dialog].

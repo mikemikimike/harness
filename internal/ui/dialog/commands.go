@@ -269,10 +269,9 @@ func (c *Commands) setCommandItems(commandType CommandType) {
 	}
 
 	c.list.SetItems(commandItems...)
-	c.list.SetFilter("")
+	clearListFilter(&c.input, c.list)
 	c.list.ScrollToTop()
 	c.list.SetSelected(0)
-	c.input.SetValue("")
 }
 
 // SetCustomCommands sets the custom commands and refreshes the view if user commands are currently displayed.

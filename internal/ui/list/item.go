@@ -77,6 +77,14 @@ type RawRenderable interface {
 	RawRender(width int) string
 }
 
+// Identifiable represents an item that carries a stable unique identifier.
+// Lists use it to recognise the same logical item across a rebuild that
+// replaces the item values.
+type Identifiable interface {
+	// ID returns the unique identifier of the item.
+	ID() string
+}
+
 // Focusable represents an item that can be aware of focus state changes.
 type Focusable interface {
 	// SetFocused sets the focus state of the item.

@@ -159,3 +159,22 @@ func TestRewindModePhaseBackRestoresTurns(t *testing.T) {
 	require.Len(t, r.list.FilteredItems(), 3)
 	require.Equal(t, "fix the lexer", r.list.FilteredItems()[0].(PickerItem).Label())
 }
+
+// TestRewindModePhaseClearsFilter pins that a phase switch clears the
+// filter input together with the list's query: the turn filter must not
+// silently keep filtering the mode rows while the input looks unrelated.
+func TestRewindModePhaseClearsFilter(t *testing.T) {
+	t.Parallel()
+
+	r := newRewindForTest(t)
+	typeKeys(r, "add")
+	r.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
+	require.Equal(t, rewindPhaseMode, r.phase)
+	require.Empty(t, r.input.Value())
+	require.Len(t, r.list.FilteredItems(), 1, "the unsnapshotted turn offers its one mode, unfiltered")
+
+	r.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEscape})
+	require.Equal(t, rewindPhaseTurns, r.phase)
+	require.Empty(t, r.input.Value())
+	require.Len(t, r.list.FilteredItems(), 3)
+}

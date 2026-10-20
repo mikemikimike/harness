@@ -225,6 +225,7 @@ func (r *Rewind) confirmSelection() Action {
 
 func (r *Rewind) enterTurnsPhase() {
 	r.phase = rewindPhaseTurns
+	clearListFilter(&r.input, r.list)
 	r.list.SetItems(rewindTurnItems(r.com.Styles, r.turns)...)
 	r.list.SetSelected(0)
 	r.list.ScrollToTop()
@@ -233,6 +234,7 @@ func (r *Rewind) enterTurnsPhase() {
 func (r *Rewind) enterModePhase() {
 	r.phase = rewindPhaseMode
 	choices := rewindModeChoices(r.selected.HasFiles)
+	clearListFilter(&r.input, r.list)
 	r.list.SetItems(rewindModeItems(r.com.Styles, choices)...)
 	r.list.SetSelected(0)
 	r.list.ScrollToTop()

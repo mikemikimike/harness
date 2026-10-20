@@ -141,3 +141,11 @@ func applyListFilter(l *list.FilterableList) func(query string) {
 		l.ScrollToTop()
 	}
 }
+
+// clearListFilter empties the filter input and the list's query
+// together, so the input never shows a query the list is not applying.
+// Dialogs call it when they swap the list to a different set of items.
+func clearListFilter(input *textinput.Model, l *list.FilterableList) {
+	input.SetValue("")
+	l.SetFilter("")
+}

@@ -150,3 +150,32 @@ func TestLSPServersConstructAndBrowse(t *testing.T) {
 	require.Equal(t, serversPhaseList, d.phase)
 	drawServers(t, d)
 }
+
+// TestServersDialogLiveRefreshKeepsFilter pins that a live refresh
+// keeps applying the typed filter and keeps the selection on the same
+// server, and that switching phase clears the filter input and query.
+func TestServersDialogLiveRefreshKeepsFilter(t *testing.T) {
+	t.Parallel()
+
+	d := NewMCPServers(newServersTestCommon(), map[string]mcp.ClientInfo{
+		"alpha": {Name: "alpha", State: mcp.StateConnected},
+		"beta":  {Name: "beta", State: mcp.StateError, Error: errors.New("boom")},
+	})
+	typeKeys(d, "beta")
+	require.Len(t, d.list.FilteredItems(), 1)
+
+	d.SetStates(map[string]mcp.ClientInfo{"beta": {Name: "beta", State: mcp.StateConnected}})
+	require.Equal(t, 1, d.list.Len(), "the refreshed list stays filtered")
+	require.Equal(t, "beta", d.list.SelectedItem().(*CommandItem).Title())
+
+	d.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
+	require.Equal(t, serversPhaseDetail, d.phase)
+	require.Empty(t, d.input.Value(), "entering the detail view clears the filter")
+	require.Equal(t, len(d.source.detailItems("beta")), d.list.Len())
+
+	d.HandleMsg(tea.KeyPressMsg{Code: tea.KeyEscape})
+	require.Equal(t, serversPhaseList, d.phase)
+	require.Empty(t, d.input.Value())
+	require.Equal(t, 3, d.list.Len())
+	require.Equal(t, "beta", d.list.SelectedItem().(*CommandItem).Title(), "returning selects the server the detail showed")
+}

@@ -104,34 +104,26 @@ func NewFilterableList(items ...FilterableItem) *FilterableList {
 	return f
 }
 
-// SetItems sets the list items and updates the filtered items.
+// SetItems sets the list items and re-applies the current filter, so the
+// visible items always match the query. The selection follows the same
+// item (see refilter), not the same position.
 func (f *FilterableList) SetItems(items ...FilterableItem) {
 	f.items = items
-	fitems := make([]Item, len(items))
-	for i, item := range items {
-		fitems[i] = item
-	}
-	f.List.SetItems(fitems...)
+	f.refilter()
 }
 
-// AppendItems appends items to the list and updates the filtered items.
+// AppendItems appends items to the list and re-applies the current
+// filter, keeping the selection on the same item.
 func (f *FilterableList) AppendItems(items ...FilterableItem) {
 	f.items = append(f.items, items...)
-	itms := make([]Item, len(f.items))
-	for i, item := range f.items {
-		itms[i] = item
-	}
-	f.List.SetItems(itms...)
+	f.refilter()
 }
 
-// PrependItems prepends items to the list and updates the filtered items.
+// PrependItems prepends items to the list and re-applies the current
+// filter, keeping the selection on the same item.
 func (f *FilterableList) PrependItems(items ...FilterableItem) {
 	f.items = append(items, f.items...)
-	itms := make([]Item, len(f.items))
-	for i, item := range f.items {
-		itms[i] = item
-	}
-	f.List.SetItems(itms...)
+	f.refilter()
 }
 
 // SetFilterOrder sets an optional stable re-ranking applied to the
@@ -139,7 +131,35 @@ func (f *FilterableList) PrependItems(items ...FilterableItem) {
 // Match highlighting is unaffected.
 func (f *FilterableList) SetFilterOrder(cmp func(a, b FilterableItem) int) {
 	f.order = cmp
-	f.List.SetItems(f.FilteredItems()...)
+	f.refilter()
+}
+
+// refilter shows the items matching the current query and keeps the
+// selection on the item it was on: the same item value, or an item
+// with the same ID when both are [Identifiable] (callers rebuild their
+// items on every change). When that item is gone the selection keeps
+// its position, clamped to the new length.
+func (f *FilterableList) refilter() {
+	prev := f.SelectedItem()
+	filtered := f.FilteredItems()
+	f.List.SetItems(filtered...)
+	if prev == nil {
+		return
+	}
+	if idx := slices.IndexFunc(filtered, func(item Item) bool { return sameItem(item, prev) }); idx >= 0 {
+		f.SetSelected(idx)
+	}
+}
+
+// sameItem reports whether a and b are the same logical item: the same
+// value, or Identifiable items with equal IDs.
+func sameItem(a, b Item) bool {
+	if a == b {
+		return true
+	}
+	ai, aok := a.(Identifiable)
+	bi, bok := b.(Identifiable)
+	return aok && bok && ai.ID() == bi.ID()
 }
 
 // SetFilter sets the filter query and updates the list items.
@@ -220,6 +240,6 @@ func (f *FilterableList) FilteredItems() []Item {
 
 // Render renders the filterable list.
 func (f *FilterableList) Render() string {
-	f.List.SetItems(f.FilteredItems()...)
+	f.refilter()
 	return f.List.Render()
 }
