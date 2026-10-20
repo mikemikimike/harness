@@ -2,7 +2,6 @@ package model
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -70,9 +69,8 @@ func (m *UI) upsertAgentTask(msg *message.Message, tc message.ToolCall) tea.Cmd 
 		return nil
 	}
 
-	var params agent.AgentDispatchParams
-	_ = json.Unmarshal([]byte(tc.Input), &params)
-	if agent.IsAgentControlCall(tc.Name, tc.Input) {
+	params, kind, decided := agent.DecodeAgentCall(tc)
+	if tc.Name == agent.AgentToolName && (!decided || kind != agent.AgentCallDispatch) {
 		return nil
 	}
 
@@ -218,8 +216,7 @@ func (m *UI) loadAgentTasks(msgs []*message.Message, toolResults map[string]mess
 			if m.reapedAgentTasks[tc.ID] {
 				continue
 			}
-			var params agent.AgentDispatchParams
-			_ = json.Unmarshal([]byte(tc.Input), &params)
+			params, kind, decided := agent.DecodeAgentCall(tc)
 			_, hasResult := toolResults[tc.ID]
 			canceled := msg.FinishReason() == message.FinishReasonCanceled
 			// A set Finished flag only means the model finished emitting
@@ -232,7 +229,7 @@ func (m *UI) loadAgentTasks(msgs []*message.Message, toolResults map[string]mess
 			if canceled || (params.Blocking && (hasResult || !busy)) {
 				continue
 			}
-			if agent.IsAgentControlCall(tc.Name, tc.Input) {
+			if tc.Name == agent.AgentToolName && (!decided || kind != agent.AgentCallDispatch) {
 				continue
 			}
 			task := &agentTask{

@@ -634,8 +634,10 @@ func TestWaitingCallRendersAgentsPins(t *testing.T) {
 	}
 	require.Equal(t, 2, u.runningAgentCount())
 
+	// OnToolCall stores the call finished before the wait starts running;
+	// a call still streaming has not shown it is a wait yet.
 	wait := message.Message{ID: "m2", SessionID: "s1", Role: message.Assistant, Parts: []message.ContentPart{
-		message.ToolCall{ID: "w1", Name: "agent", Input: `{}`},
+		message.ToolCall{ID: "w1", Name: "agent", Input: `{}`, Finished: true},
 	}}
 	_ = u.updateSessionMessage(wait)
 
@@ -646,13 +648,10 @@ func TestWaitingCallRendersAgentsPins(t *testing.T) {
 	assert.NotContains(t, out, "Waiting for tool response", "the header already says the call is waiting")
 	assert.Contains(t, ansi.Strip(item.Render(80)), "Waiting for 2 agents", "the collapsed row names the wait, not the bare tool")
 
-	// The collected reports land as the call's result; the assistant
-	// update also flips the call's Finished flag, exactly as the real
-	// step-finish update does.
+	// The collected reports land as the call's result.
 	_ = u.appendSessionMessage(message.Message{ID: "tm2", SessionID: "s1", Role: message.Tool, Parts: []message.ContentPart{
 		message.ToolResult{ToolCallID: "w1", Name: "agent", Content: "All waited agents finished.\n\nworker (a1): completed\n  Result:\n**found** the culprit"},
 	}})
-	wait.Parts[0] = message.ToolCall{ID: "w1", Name: "agent", Input: `{}`, Finished: true}
 	_ = u.updateSessionMessage(wait)
 	out = ansi.Strip(waitCallRender(t, u.chat.MessageItem("w1"), 80))
 	assert.Contains(t, out, "Waited for agents")
@@ -680,6 +679,32 @@ func groupedToolRender(t *testing.T, item chat.MessageItem, toolCallID string, w
 	tool := group.ChildTool(toolCallID)
 	require.NotNil(t, tool)
 	return tool.RawRender(width)
+}
+
+// TestStreamingDispatchShowsStripRowNotWait pins what a dispatch looks
+// like while the model is still writing its prompt: a strip row with the
+// prompt so far, never a "Waiting for agents" item in the transcript.
+// Before the input shows its form the call shows nowhere.
+func TestStreamingDispatchShowsStripRowNotWait(t *testing.T) {
+	t.Parallel()
+	u := newTestUI()
+	u.state = uiChat
+	u.com.Workspace = &testWorkspace{cfg: &config.Config{}}
+	u.session = &session.Session{ID: "s1"}
+
+	stream := func(input string) message.Message {
+		call := message.ToolCall{ID: "d1", Name: "agent", Input: input}
+		return message.Message{ID: "m1", SessionID: "s1", Role: message.Assistant, Parts: []message.ContentPart{call}}
+	}
+
+	_ = u.updateSessionMessage(stream(`{`))
+	assert.Nil(t, u.chat.MessageItem("d1"), "an undecided call does not render as a wait")
+	assert.Empty(t, u.agentTasks, "an undecided call has no strip row yet")
+
+	_ = u.updateSessionMessage(stream(`{"prompt":"Audit the dispatch path`))
+	assert.Nil(t, u.chat.MessageItem("d1"), "a dispatch never renders in the transcript")
+	require.Len(t, u.agentTasks, 1, "the strip shows the agent as soon as its prompt streams")
+	assert.Contains(t, u.agentTasks[0].description, "Audit the dispatch path")
 }
 
 // TestAgentControlCallsRenderInTranscriptNotStrip pins the message and

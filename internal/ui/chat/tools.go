@@ -257,7 +257,7 @@ func firstEnv(env []*ItemEnv) *ItemEnv {
 // name alone cannot decide.
 func toolRendererFor(toolCall message.ToolCall) ToolRenderer {
 	if toolCall.Name == agent.AgentToolName {
-		switch kind := agent.AgentCallKindOf(toolCall.Input); kind {
+		switch _, kind, _ := agent.DecodeAgentCall(toolCall); kind {
 		case agent.AgentCallWait:
 			return &WaitToolRenderContext{}
 		case agent.AgentCallMessage, agent.AgentCallCancel:
@@ -301,13 +301,15 @@ func IsInternalContextTool(name string) bool {
 // dispatcher tool's control forms do render - a wait is the turn's
 // visible "waiting for N agents" state, and messages and cancels say
 // what the turn did to running agents - and context plumbing never
-// renders. Single source for the extraction and export filters, so the
-// two cannot drift.
-func RendersInTranscript(name, input string) bool {
-	if IsInternalContextTool(name) {
+// renders. A dispatcher call that has not yet shown its form renders
+// nowhere until it does, so it never paints as a wait and then turns
+// into a dispatch. Single source for the extraction and export filters,
+// so the two cannot drift.
+func RendersInTranscript(tc message.ToolCall) bool {
+	if IsInternalContextTool(tc.Name) {
 		return false
 	}
-	return !IsSubagentTool(name) || agent.IsAgentControlCall(name, input)
+	return !IsSubagentTool(tc.Name) || agent.IsAgentControlCall(tc)
 }
 
 // SetCompact implements the Compactable interface.

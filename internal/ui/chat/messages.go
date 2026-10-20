@@ -604,7 +604,7 @@ func ExtractMessageItems(sty *styles.Styles, msg *message.Message, toolResults m
 			// Dispatches render in the background tasks strip; context
 			// plumbing stays in the history the model sees but is noise
 			// here. One predicate decides for transcript and export both.
-			if !RendersInTranscript(tc.Name, tc.Input) {
+			if !RendersInTranscript(tc) {
 				continue
 			}
 			var result *message.ToolResult

@@ -235,23 +235,46 @@ func TestCancelSubagentsRequiresRunningHandles(t *testing.T) {
 func TestAgentDispatchParamsKind(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
-		name  string
-		input string
-		want  AgentCallKind
+		name     string
+		input    string
+		finished bool
+		want     AgentCallKind
+		decided  bool
+		control  bool
 	}{
-		{name: "dispatch", input: `{"prompt":"go"}`, want: AgentCallDispatch},
-		{name: "wait", input: `{"handles":["bg-1"]}`, want: AgentCallWait},
-		{name: "streaming", input: ``, want: AgentCallWait},
-		{name: "message", input: `{"message":"hi","handles":["bg-1"]}`, want: AgentCallMessage},
-		{name: "cancel", input: `{"cancel":true,"handles":["bg-1"]}`, want: AgentCallCancel},
+		{name: "dispatch", input: `{"prompt":"go"}`, finished: true, want: AgentCallDispatch, decided: true},
+		{name: "wait", input: `{"handles":["bg-1"]}`, finished: true, want: AgentCallWait, decided: true, control: true},
+		{name: "empty wait", input: `{}`, finished: true, want: AgentCallWait, decided: true, control: true},
+		{name: "message", input: `{"message":"hi","handles":["bg-1"]}`, finished: true, want: AgentCallMessage, decided: true, control: true},
+		{name: "cancel", input: `{"cancel":true,"handles":["bg-1"]}`, finished: true, want: AgentCallCancel, decided: true, control: true},
+		{name: "streaming nothing yet", input: ``, want: AgentCallWait},
+		{name: "streaming open brace", input: `{`, want: AgentCallWait},
+		{name: "streaming handles", input: `{"handles":["bg-1"`, want: AgentCallWait},
+		{name: "streaming prompt", input: `{"prompt":"Audit the UI`, want: AgentCallDispatch, decided: true},
+		{name: "streaming message", input: `{"handles":["bg-1"],"message":"sto`, want: AgentCallMessage, decided: true, control: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			assert.Equal(t, tc.want, AgentCallKindOf(tc.input))
-			assert.Equal(t, tc.want != AgentCallDispatch, IsAgentControlCall(AgentToolName, tc.input))
+			call := message.ToolCall{Name: AgentToolName, Input: tc.input, Finished: tc.finished}
+			_, kind, decided := DecodeAgentCall(call)
+			assert.Equal(t, tc.want, kind)
+			assert.Equal(t, tc.decided, decided)
+			assert.Equal(t, tc.control, IsAgentControlCall(call))
 		})
 	}
-	assert.False(t, IsAgentControlCall("research", `{}`), "only the agent tool has control forms")
+	assert.False(t, IsAgentControlCall(message.ToolCall{Name: "research", Input: `{}`, Finished: true}), "only the agent tool has control forms")
+}
+
+// TestDecodeAgentCallReadsStreamingPrompt pins that a dispatch still
+// streaming its input exposes the prompt typed so far, so the task strip
+// can show the agent being prepared instead of a wait.
+func TestDecodeAgentCallReadsStreamingPrompt(t *testing.T) {
+	t.Parallel()
+	params, kind, decided := DecodeAgentCall(message.ToolCall{Name: AgentToolName, Input: `{"blocking":true,"prompt":"Audit the UI and`})
+	assert.True(t, decided)
+	assert.Equal(t, AgentCallDispatch, kind)
+	assert.Equal(t, "Audit the UI and", params.Prompt)
+	assert.True(t, params.Blocking)
 }
 
 func TestAgentDispatchParamsRejectsMixedForms(t *testing.T) {

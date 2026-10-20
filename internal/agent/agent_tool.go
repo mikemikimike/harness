@@ -12,11 +12,13 @@ import (
 	"github.com/stubbedev/harness/internal/toolname"
 
 	"charm.land/fantasy"
+	"charm.land/fantasy/jsonrepair"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/stubbedev/harness/internal/agent/prompt"
 	"github.com/stubbedev/harness/internal/agent/tools"
 	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/message"
 	"github.com/stubbedev/harness/internal/skills"
 	"github.com/stubbedev/harness/internal/subagents"
 )
@@ -67,8 +69,7 @@ const (
 	AgentCallCancel
 )
 
-// Kind classifies the call. A call still streaming its input has no
-// fields yet and classifies as a wait until one arrives.
+// Kind classifies complete params.
 func (p AgentDispatchParams) Kind() AgentCallKind {
 	switch {
 	case p.Prompt != "":
@@ -101,20 +102,33 @@ const (
 	AgentToolName = toolname.Agent
 )
 
-// AgentCallKindOf classifies a dispatcher tool call's input. Single
-// source for the task strip's row filter and the transcript's renderer
-// choice.
-func AgentCallKindOf(input string) AgentCallKind {
-	var params AgentDispatchParams
-	_ = json.Unmarshal([]byte(input), &params)
-	return params.Kind()
+// DecodeAgentCall decodes a dispatcher tool call as far as its input has
+// streamed and classifies it. An unfinished input is repaired into the
+// JSON it is a prefix of, so a dispatch is recognised, with its prompt so
+// far, from the first characters of the prompt. decided is false while a
+// streaming call has not yet shown its form: a wait is only known once
+// the input is complete without a prompt, message or cancel. Single
+// source for the task strip's rows and the transcript's renderer choice.
+func DecodeAgentCall(call message.ToolCall) (params AgentDispatchParams, kind AgentCallKind, decided bool) {
+	if err := json.Unmarshal([]byte(call.Input), &params); err != nil && !call.Finished {
+		if repaired, repairErr := jsonrepair.RepairJSON(call.Input); repairErr == nil {
+			_ = json.Unmarshal([]byte(repaired), &params)
+		}
+	}
+	kind = params.Kind()
+	return params, kind, call.Finished || kind != AgentCallWait
 }
 
 // IsAgentControlCall reports whether a tool call is the dispatcher tool
 // acting on agents already dispatched (waiting for, messaging or
-// cancelling them) rather than dispatching a new one.
-func IsAgentControlCall(name, input string) bool {
-	return name == AgentToolName && AgentCallKindOf(input) != AgentCallDispatch
+// cancelling them) rather than dispatching a new one. A call that has not
+// shown its form yet is neither.
+func IsAgentControlCall(call message.ToolCall) bool {
+	if call.Name != AgentToolName {
+		return false
+	}
+	_, kind, decided := DecodeAgentCall(call)
+	return decided && kind != AgentCallDispatch
 }
 
 // dispatcherTool implements fantasy.AgentTool with a dynamically-built schema.

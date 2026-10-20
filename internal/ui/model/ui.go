@@ -1931,7 +1931,7 @@ func (m *UI) updateSessionMessage(msg message.Message) tea.Cmd {
 
 	var items []chat.MessageItem
 	for _, tc := range msg.ToolCalls() {
-		if !chat.RendersInTranscript(tc.Name, tc.Input) {
+		if !chat.RendersInTranscript(tc) {
 			// Subagent dispatches live in the background tasks strip;
 			// context plumbing (skill_search, tool_search) is noise in
 			// the transcript. One predicate with extraction and export.

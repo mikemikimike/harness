@@ -128,7 +128,7 @@ func renderMessageMarkdown(msg message.Message, results map[string]message.ToolR
 	for _, tc := range msg.ToolCalls() {
 		// One visibility predicate with the transcript: what renders on
 		// screen renders in the export.
-		if !chat.RendersInTranscript(tc.Name, tc.Input) {
+		if !chat.RendersInTranscript(tc) {
 			continue
 		}
 		fmt.Fprintf(&body, "#### Tool: %s\n\n", tc.Name)
