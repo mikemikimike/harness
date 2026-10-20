@@ -251,6 +251,7 @@ func TestStreamingAgent_EarlyDispatchDiscardedOnAbnormalFinish(t *testing.T) {
 			}
 
 			var toolCalls, toolResults atomic.Int32
+			var discarded []string
 			agent := NewAgent(earlyDispatchModel(first), WithTools(probe), WithEarlyToolDispatch(allowEarly))
 			result, err := agent.Stream(context.Background(), AgentStreamCall{
 				Prompt: "probe",
@@ -262,11 +263,16 @@ func TestStreamingAgent_EarlyDispatchDiscardedOnAbnormalFinish(t *testing.T) {
 					toolResults.Add(1)
 					return nil
 				},
+				OnEarlyToolCallDiscarded: func(tc ToolCallContent) {
+					require.True(t, canceled.Load(), "the call has returned, canceled, before it is reported discarded")
+					discarded = append(discarded, tc.ToolCallID)
+				},
 			})
 			require.NoError(t, err)
 			require.True(t, startedBeforeFinish.Load(), "probe must have started early")
 			require.True(t, canceled.Load(), "a discarded early call must be canceled")
 			require.Zero(t, toolResults.Load(), "no result may be reported for a call that was not dispatched")
+			require.Equal(t, []string{"call-1"}, discarded, "the consumer hears which early call was discarded")
 
 			wantCalls := int32(0)
 			if reason == FinishReasonStop {
@@ -279,6 +285,33 @@ func TestStreamingAgent_EarlyDispatchDiscardedOnAbnormalFinish(t *testing.T) {
 			require.Len(t, result.Steps[0].Content.ToolCalls(), 1, "the call itself is still recorded")
 		})
 	}
+}
+
+// TestStreamingAgent_ReleasedEarlyCallIsNotReportedDiscarded checks that
+// an early call whose result the step reports is never passed to
+// OnEarlyToolCallDiscarded.
+func TestStreamingAgent_ReleasedEarlyCallIsNotReportedDiscarded(t *testing.T) {
+	t.Parallel()
+
+	probe := NewParallelAgentTool("probe", "answers at once",
+		func(ctx context.Context, in earlyInput, call ToolCall) (ToolResponse, error) {
+			return NewTextResponse("probed"), nil
+		})
+	first := func(yield func(StreamPart) bool) {
+		if !yield(toolCallPart("call-1", "probe", `{"n":1}`)) {
+			return
+		}
+		yield(finishPart(FinishReasonToolCalls))
+	}
+	var discarded atomic.Int32
+	agent := NewAgent(earlyDispatchModel(first), WithTools(probe), WithEarlyToolDispatch(allowEarly))
+	result, err := agent.Stream(context.Background(), AgentStreamCall{
+		Prompt:                   "probe",
+		OnEarlyToolCallDiscarded: func(ToolCallContent) { discarded.Add(1) },
+	})
+	require.NoError(t, err)
+	require.Zero(t, discarded.Load())
+	require.Equal(t, []string{"call-1"}, toolResultIDs(result.Steps[0]))
 }
 
 // TestStreamingAgent_EarlyDispatchCanceledWithContext checks that canceling

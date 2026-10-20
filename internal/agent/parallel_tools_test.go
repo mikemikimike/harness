@@ -10,8 +10,10 @@ import (
 	"charm.land/fantasy"
 	"github.com/stretchr/testify/require"
 
+	"github.com/stubbedev/harness/internal/agent/tools"
 	"github.com/stubbedev/harness/internal/catalog"
 	"github.com/stubbedev/harness/internal/config"
+	"github.com/stubbedev/harness/internal/session"
 )
 
 // probeTool blocks each call until `want` calls have started, so a test
@@ -108,4 +110,82 @@ func TestSequentialToolsRunOneAtATime(t *testing.T) {
 	_, err = probeAgent(t, env, probe).Run(t.Context(), SessionAgentCall{SessionID: sess.ID, Prompt: "probe"})
 	require.NoError(t, err)
 	require.Equal(t, int32(1), probe.peak.Load(), "sequential tools never overlap")
+}
+
+type recordingDiscarder struct {
+	mu       sync.Mutex
+	children []string
+}
+
+func (d *recordingDiscarder) DiscardSubagentDispatch(childSessionID string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.children = append(d.children, childSessionID)
+}
+
+func (d *recordingDiscarder) discarded() []string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return append([]string(nil), d.children...)
+}
+
+// A sub-agent dispatch starts while its message is still streaming; when
+// the step then ends abnormally the session agent hands the dispatch's
+// child session to the discarder, so the run the model never saw the
+// handle of is undone. A completed step discards nothing.
+func TestEarlySubagentDispatchDiscardedWithItsStep(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		finish  fantasy.FinishReason
+		wantOne bool
+	}{
+		{name: "length", finish: fantasy.FinishReasonLength, wantOne: true},
+		{name: "tool calls", finish: fantasy.FinishReasonToolCalls},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := testEnv(t)
+			started := make(chan string, 1)
+			dispatch := fantasy.NewParallelAgentTool(AgentToolName, "dispatch",
+				func(ctx context.Context, in AgentDispatchParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
+					messageID, _ := ctx.Value(tools.MessageIDContextKey).(string)
+					started <- messageID
+					return fantasy.NewTextResponse("handle bg-1"), nil
+				})
+			discarder := &recordingDiscarder{}
+			model := newScriptedModel(scriptedTurn{
+				calls:  []scriptedCall{{name: AgentToolName, input: map[string]any{"prompt": "audit"}}},
+				finish: tc.finish,
+			})
+			a := NewSessionAgent(SessionAgentOptions{
+				LargeModel: Model{
+					Model:      model,
+					CatalogCfg: catalog.Model{ID: "large", ContextWindow: 1_000_000, DefaultMaxTokens: 1000},
+					ModelCfg:   config.SelectedModel{Model: "large", Provider: "scripted"},
+				},
+				SmallModel:      Model{Model: textModel("title")},
+				SystemPrompt:    "system",
+				Sessions:        env.sessions,
+				Messages:        env.messages,
+				Tools:           []fantasy.AgentTool{dispatch},
+				SubagentDiscard: discarder,
+			})
+			sess, err := env.sessions.Create(t.Context(), "early")
+			require.NoError(t, err)
+
+			_, _ = a.Run(t.Context(), SessionAgentCall{SessionID: sess.ID, Prompt: "fan out"})
+			require.Len(t, started, 1, "the dispatch started")
+			dispatchMessageID := <-started
+
+			if !tc.wantOne {
+				require.Empty(t, discarder.discarded())
+				return
+			}
+			discarded := discarder.discarded()
+			require.Len(t, discarded, 1)
+			messageID, toolCallID, ok := session.ParseAgentToolSessionID(discarded[0])
+			require.True(t, ok, "the discarder gets the dispatch's child session ID")
+			require.Equal(t, dispatchMessageID, messageID, "the child session is the one the dispatch created")
+			require.Equal(t, "call-1-0", toolCallID)
+		})
+	}
 }

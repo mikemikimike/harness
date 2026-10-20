@@ -93,6 +93,24 @@ func describeRuns(runs []*backgroundRun) string {
 	return strings.Join(names, ", ")
 }
 
+// DiscardSubagentDispatch implements SubagentDispatchDiscarder: the run
+// started for childSessionID is cancelled and dropped from the session's
+// background runs, so no wait collects it and no handle list names it.
+// The model never saw its handle. A blocking dispatch needs nothing here:
+// its run ended with the early call's context.
+func (c *coordinator) DiscardSubagentDispatch(childSessionID string) {
+	if c.backgroundByChild != nil && c.backgroundRuns != nil {
+		if handle, ok := c.backgroundByChild.Get(childSessionID); ok {
+			c.backgroundRuns.Del(handle)
+		}
+	}
+	if c.subagentCancels != nil {
+		if cancel, ok := c.subagentCancels.Get(childSessionID); ok && cancel != nil {
+			cancel()
+		}
+	}
+}
+
 // messageSubagents is the `agent` tool with a message: it delivers text
 // to running background agents, each reading it as a user message before
 // its next step. With no handles named it goes to every running agent

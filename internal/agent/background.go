@@ -48,6 +48,14 @@ type SubagentInboxSource interface {
 	DrainSubagentInbox(sessionID string) []SubagentInboxMessage
 }
 
+// SubagentDispatchDiscarder undoes a sub-agent dispatch that started
+// while its message was still streaming and whose step then discarded
+// it: the model never saw its result, so the run is cancelled and no wait
+// or report ever mentions it. The coordinator is the only implementation.
+type SubagentDispatchDiscarder interface {
+	DiscardSubagentDispatch(childSessionID string)
+}
+
 // QueueArrivalNotifier is told when a prompt is queued for a busy
 // session. The coordinator is the only implementation: it stamps the
 // arrival so a tool call can report it, and wakes a wait parked on the

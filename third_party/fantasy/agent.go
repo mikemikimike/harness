@@ -321,6 +321,13 @@ type AgentStreamCall struct {
 	// EarlyToolDispatchFunction for which calls it is asked about.
 	EarlyToolDispatch EarlyToolDispatchFunction
 
+	// OnEarlyToolCallDiscarded is told about every call that started early
+	// whose result the step then discarded (the stream ended on anything
+	// but a tool-calls finish, or failed). The call's context is already
+	// canceled and the call has returned; this is for effects that outlive
+	// the call, such as work it handed to a goroutine of its own.
+	OnEarlyToolCallDiscarded func(toolCall ToolCallContent)
+
 	// Agent-level callbacks
 	OnAgentStart  OnAgentStartFunc  // Called when agent starts
 	OnAgentFinish OnAgentFinishFunc // Called when agent finishes
@@ -1583,12 +1590,16 @@ func (a *agent) processStepStream(ctx context.Context, stream StreamResponse, op
 	// callback has run. Any other ending discards it, so the step records
 	// the call exactly as one that was never dispatched.
 	type earlyCall struct {
+		toolCall ToolCallContent
 		done     chan struct{}
 		result   ToolResultContent
 		critical bool
+		released bool
 	}
-	// Keyed by index into rawToolCalls.
+	// Keyed by index into rawToolCalls; earlyOrder keeps them in the order
+	// they started.
 	earlyCalls := make(map[int]*earlyCall)
+	var earlyOrder []*earlyCall
 	earlyCtx, cancelEarly := context.WithCancel(ctx)
 	var earlyWg sync.WaitGroup
 	// However the step ends, no early call outlives it: one whose result is
@@ -1597,6 +1608,14 @@ func (a *agent) processStepStream(ctx context.Context, stream StreamResponse, op
 	defer func() {
 		cancelEarly()
 		earlyWg.Wait()
+		if opts.OnEarlyToolCallDiscarded == nil {
+			return
+		}
+		for _, early := range earlyOrder {
+			if !early.released {
+				opts.OnEarlyToolCallDiscarded(early.toolCall)
+			}
+		}
 	}()
 
 	// Process stream parts
@@ -1759,8 +1778,9 @@ func (a *agent) processStepStream(ctx context.Context, stream StreamResponse, op
 			// Only its execution is early; OnToolCall and OnToolResult
 			// still wait, and an abnormal finish discards its result.
 			if a.canDispatchEarly(toolCall, toolMap, stepTools, execProviderTools, opts.EarlyToolDispatch) {
-				early := &earlyCall{done: make(chan struct{})}
+				early := &earlyCall{toolCall: toolCall, done: make(chan struct{})}
 				earlyCalls[len(rawToolCalls)-1] = early
+				earlyOrder = append(earlyOrder, early)
 				earlyWg.Go(func() {
 					defer close(early.done)
 					release := acquireParallel(earlyCtx)
@@ -1924,6 +1944,7 @@ func (a *agent) processStepStream(ctx context.Context, stream StreamResponse, op
 	// waiting for the one emitted before it, so they keep their order and
 	// still run one at a time without holding up the parallel ones.
 	for _, early := range releasedEarly {
+		early.released = true
 		toolExecutionWg.Go(func() {
 			<-early.done
 			if opts.OnToolResult != nil {

@@ -1074,8 +1074,9 @@ func (c *coordinator) buildAgent(ctx context.Context, prompt *prompt.Prompt, age
 		// dispatch (the coder today) ever has entries, so wiring it for
 		// every agent is a no-op for children. The queue notifier is the
 		// same shape: children are never waited on through the wait tool.
-		SubagentInbox: c,
-		QueueNotify:   c,
+		SubagentInbox:   c,
+		SubagentDiscard: c,
+		QueueNotify:     c,
 		// Only top-level agents speak for the process in the presence
 		// registry; sub-agents still publish file activity through the
 		// edit/write tools, which hold the registry directly.

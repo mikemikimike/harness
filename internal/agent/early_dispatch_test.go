@@ -10,9 +10,9 @@ import (
 )
 
 // TestEarlyToolDispatchOnlyReadOnlyTools pins the early-dispatch list to
-// tools that read. The mutating tools are Parallel as well, so a careless
-// "every Parallel tool" rule would start an edit or a command before the
-// model's turn is known to be complete.
+// tools that read, plus sub-agent dispatches. The mutating tools are
+// Parallel as well, so a careless "every Parallel tool" rule would start
+// an edit or a command before the model's turn is known to be complete.
 func TestEarlyToolDispatchOnlyReadOnlyTools(t *testing.T) {
 	t.Parallel()
 
@@ -21,10 +21,34 @@ func TestEarlyToolDispatchOnlyReadOnlyTools(t *testing.T) {
 	}
 	for _, name := range []string{
 		tools.EditToolName, tools.WriteToolName, tools.ShellToolName,
-		AgentToolName, tools.ResearchToolName, tools.MemoryToolName,
-		tools.QuestionToolName, tools.MCPResourceToolName,
+		tools.MemoryToolName, tools.QuestionToolName, tools.MCPResourceToolName,
 	} {
 		require.False(t, earlyToolDispatch(fantasy.ToolCallContent{ToolName: name}), name)
+	}
+}
+
+// Sub-agent dispatches start early so a fan-out's first agent runs while
+// the model still writes the rest; the dispatcher's control forms act on
+// running agents and wait for the message to finish.
+func TestEarlyToolDispatchSubagentDispatchesOnly(t *testing.T) {
+	t.Parallel()
+
+	for _, call := range []fantasy.ToolCallContent{
+		{ToolName: AgentToolName, Input: `{"prompt":"audit"}`},
+		{ToolName: AgentToolName, Input: `{"prompt":"audit","blocking":true}`},
+		{ToolName: tools.ResearchToolName, Input: `{"prompt":"look up"}`},
+	} {
+		require.True(t, earlyToolDispatch(call), call.Input)
+	}
+	for _, input := range []string{
+		`{}`,
+		`{"handles":["bg-1"]}`,
+		`{"message":"stop","handles":["bg-1"]}`,
+		`{"cancel":true,"handles":["bg-1"]}`,
+		`{"prompt":"audit","message":"stop"}`,
+		`not json`,
+	} {
+		require.False(t, earlyToolDispatch(fantasy.ToolCallContent{ToolName: AgentToolName, Input: input}), input)
 	}
 }
 

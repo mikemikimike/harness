@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"testing"
+	"time"
 
 	"charm.land/fantasy"
 	"github.com/stretchr/testify/assert"
@@ -230,6 +231,29 @@ func TestCancelSubagentsRequiresRunningHandles(t *testing.T) {
 	done := f.coord.cancelSubagents(f.parent, []string{finished.handle})
 	require.True(t, done.IsError)
 	assert.Contains(t, done.Content, "already finished")
+}
+
+// TestDiscardSubagentDispatchCancelsAndForgetsRun pins what happens to a
+// background dispatch that started early in a step the stream then
+// discarded: its run is cancelled, and no wait or handle list mentions
+// it, since the model never saw its handle. Other runs are untouched.
+func TestDiscardSubagentDispatchCancelsAndForgetsRun(t *testing.T) {
+	f := newControlFixture(t)
+	discarded := f.startChild(t, "discarded")
+	kept := f.startChild(t, "kept")
+	run, ok := f.coord.backgroundRunFor(f.parent, discarded.handle)
+	require.True(t, ok)
+
+	f.coord.DiscardSubagentDispatch(discarded.session)
+
+	assert.NotContains(t, f.coord.knownBackgroundHandles(f.parent), discarded.handle)
+	assert.Contains(t, f.coord.knownBackgroundHandles(f.parent), kept.handle)
+	require.Eventually(t, run.isFinished, 5*time.Second, 10*time.Millisecond, "the discarded run is cancelled")
+	_, status, _, _ := run.snapshot()
+	assert.Equal(t, subagents.StatusCancelled, status)
+	keptRun, ok := f.coord.backgroundRunFor(f.parent, kept.handle)
+	require.True(t, ok)
+	assert.False(t, keptRun.isFinished())
 }
 
 func TestAgentDispatchParamsKind(t *testing.T) {

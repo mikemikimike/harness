@@ -258,6 +258,10 @@ type sessionAgent struct {
 	// running child lands in its dispatcher's next step.
 	subagentInbox SubagentInboxSource
 
+	// subagentDiscard, when set, undoes sub-agent dispatches that started
+	// early in a step that was then discarded.
+	subagentDiscard SubagentDispatchDiscarder
+
 	// queueNotify, when set, is told every time a prompt is queued for a
 	// busy session (see QueueArrivalNotifier).
 	queueNotify QueueArrivalNotifier
@@ -353,6 +357,9 @@ type SessionAgentOptions struct {
 	// SubagentInbox, when set, is drained per step so messages from
 	// running background sub-agents reach this session mid-turn.
 	SubagentInbox SubagentInboxSource
+	// SubagentDiscard, when set, undoes sub-agent dispatches that started
+	// early in a step that was then discarded.
+	SubagentDiscard SubagentDispatchDiscarder
 	// QueueNotify, when set, is told every time a prompt is queued for
 	// a busy session, so a wait blocked on that session can surface it
 	// at once instead of sleeping to its timeout.
@@ -390,6 +397,7 @@ func NewSessionAgent(
 		runComplete:           opts.RunComplete,
 		hooks:                 opts.Hooks,
 		subagentInbox:         opts.SubagentInbox,
+		subagentDiscard:       opts.SubagentDiscard,
 		queueNotify:           opts.QueueNotify,
 		presence:              opts.Presence,
 		messageQueue:          csync.NewMap[string, []SessionAgentCall](),
@@ -1632,6 +1640,12 @@ func (a *sessionAgent) Run(ctx context.Context, call SessionAgentCall) (result *
 		OnToolInputDelta: func(id, delta string) error {
 			currentAssistant.AppendToolCallInput(id, delta)
 			return a.messages.Update(genCtx, *currentAssistant)
+		},
+		OnEarlyToolCallDiscarded: func(tc fantasy.ToolCallContent) {
+			if a.subagentDiscard == nil || !isSubagentDispatchTool(tc.ToolName) {
+				return
+			}
+			a.subagentDiscard.DiscardSubagentDispatch(session.AgentToolSessionID(currentAssistant.ID, tc.ToolCallID))
 		},
 		OnRetry: func(err *fantasy.ProviderError, delay time.Duration) {
 			slog.Warn("Provider request failed, retrying", providerRetryLogFields(err, delay)...)
