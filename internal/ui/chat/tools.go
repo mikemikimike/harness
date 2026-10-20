@@ -252,12 +252,18 @@ func firstEnv(env []*ItemEnv) *ItemEnv {
 }
 
 // toolRendererFor returns the renderer for a tool call. The whole call
-// is the key: the agent tool renders as a wait while it is in its
-// waiting form (no prompt) and never renders at all as a dispatch, so
-// the name alone cannot decide.
+// is the key: the agent tool renders by the form it takes (a wait, a
+// message or a cancel) and never renders at all as a dispatch, so the
+// name alone cannot decide.
 func toolRendererFor(toolCall message.ToolCall) ToolRenderer {
-	if toolCall.Name == agent.AgentToolName && agent.IsAgentWaitCall(toolCall.Name, toolCall.Input) {
-		return &WaitToolRenderContext{}
+	if toolCall.Name == agent.AgentToolName {
+		switch kind := agent.AgentCallKindOf(toolCall.Input); kind {
+		case agent.AgentCallWait:
+			return &WaitToolRenderContext{}
+		case agent.AgentCallMessage, agent.AgentCallCancel:
+			return &AgentControlToolRenderContext{kind: kind}
+		case agent.AgentCallDispatch:
+		}
 	}
 	if spec, ok := toolSpecs[toolCall.Name]; ok && spec.renderer != nil {
 		return spec.renderer()
@@ -292,15 +298,16 @@ func IsInternalContextTool(name string) bool {
 // RendersInTranscript reports whether a tool call appears in the
 // transcript, and therefore in the export, which mirrors the screen.
 // Subagent dispatches live in the background tasks strip instead; the
-// dispatcher tool's waiting form does render — it is the turn's
-// visible "waiting for N agents" state — and context plumbing never
+// dispatcher tool's control forms do render - a wait is the turn's
+// visible "waiting for N agents" state, and messages and cancels say
+// what the turn did to running agents - and context plumbing never
 // renders. Single source for the extraction and export filters, so the
 // two cannot drift.
 func RendersInTranscript(name, input string) bool {
 	if IsInternalContextTool(name) {
 		return false
 	}
-	return !IsSubagentTool(name) || agent.IsAgentWaitCall(name, input)
+	return !IsSubagentTool(name) || agent.IsAgentControlCall(name, input)
 }
 
 // SetCompact implements the Compactable interface.
@@ -1319,6 +1326,9 @@ func (t *baseToolMessageItem) DisplayName() string {
 			waiting = t.waitingAgents()
 		}
 		return waitLabel(t.EffectiveStatus() == ToolStatusRunning, waiting)
+	}
+	if control, ok := t.toolRenderer.(*AgentControlToolRenderContext); ok {
+		return control.label(t.EffectiveStatus() == ToolStatusRunning)
 	}
 	return callLabel(t.toolCall)
 }

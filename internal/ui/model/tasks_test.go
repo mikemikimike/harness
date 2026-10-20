@@ -666,13 +666,75 @@ func TestWaitingCallRendersAgentsPins(t *testing.T) {
 // it (a singleton group once folded), at the body width.
 func waitCallRender(t *testing.T, item chat.MessageItem, width int) string {
 	t.Helper()
+	return groupedToolRender(t, item, "w1", width)
+}
+
+// groupedToolRender renders the tool call with the given ID inside the
+// group that folded it, at the body width.
+func groupedToolRender(t *testing.T, item chat.MessageItem, toolCallID string, width int) string {
+	t.Helper()
 	group, ok := item.(interface {
 		ChildTool(string) chat.ToolMessageItem
 	})
 	require.True(t, ok, "tool calls fold into groups")
-	tool := group.ChildTool("w1")
+	tool := group.ChildTool(toolCallID)
 	require.NotNil(t, tool)
 	return tool.RawRender(width)
+}
+
+// TestAgentControlCallsRenderInTranscriptNotStrip pins the message and
+// cancel forms of the agent tool: they act on agents already running, so
+// they never add a strip row, and they render in the transcript named by
+// their action with the delivery acknowledgement as the body.
+func TestAgentControlCallsRenderInTranscriptNotStrip(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, input, running, settled, ack string
+	}{
+		{
+			name:    "message",
+			input:   `{"message":"skip the tests","handles":["bg-1"]}`,
+			running: "Messaging agents",
+			settled: "Messaged agents",
+			ack:     "Message delivered to 1 agent(s)",
+		},
+		{
+			name:    "cancel",
+			input:   `{"cancel":true,"handles":["bg-1"]}`,
+			running: "Cancelling agents",
+			settled: "Cancelled agents",
+			ack:     "Cancelled 1 agent(s)",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			u := newTestUI()
+			u.state = uiChat
+			u.com.Workspace = &testWorkspace{cfg: &config.Config{}}
+			u.session = &session.Session{ID: "s1"}
+
+			call := message.ToolCall{ID: "c1", Name: "agent", Input: tc.input}
+			assistant := message.Message{ID: "m1", SessionID: "s1", Role: message.Assistant, Parts: []message.ContentPart{call}}
+			_ = u.upsertAgentTask(&assistant, call)
+			assert.Empty(t, u.agentTasks, "a control call is not a dispatch and gets no strip row")
+
+			_ = u.updateSessionMessage(assistant)
+			item := u.chat.MessageItem("c1")
+			require.NotNil(t, item, "the control call renders in the transcript")
+			assert.Contains(t, ansi.Strip(groupedToolRender(t, item, "c1", 80)), tc.running)
+
+			_ = u.appendSessionMessage(message.Message{ID: "tm1", SessionID: "s1", Role: message.Tool, Parts: []message.ContentPart{
+				message.ToolResult{ToolCallID: "c1", Name: "agent", Content: tc.ack + ": worker (bg-1)."},
+			}})
+			call.Finished = true
+			assistant.Parts[0] = call
+			_ = u.updateSessionMessage(assistant)
+			out := ansi.Strip(groupedToolRender(t, u.chat.MessageItem("c1"), "c1", 80))
+			assert.Contains(t, out, tc.settled)
+			assert.Contains(t, out, "bg-1")
+			assert.Contains(t, out, tc.ack)
+		})
+	}
 }
 
 // TestRunningDispatchesLiveOnlyInTheStrip pins that a dispatch shows up

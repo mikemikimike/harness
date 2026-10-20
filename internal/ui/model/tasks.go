@@ -72,7 +72,7 @@ func (m *UI) upsertAgentTask(msg *message.Message, tc message.ToolCall) tea.Cmd 
 
 	var params agent.AgentDispatchParams
 	_ = json.Unmarshal([]byte(tc.Input), &params)
-	if agent.IsAgentWaitCall(tc.Name, tc.Input) {
+	if agent.IsAgentControlCall(tc.Name, tc.Input) {
 		return nil
 	}
 
@@ -232,7 +232,7 @@ func (m *UI) loadAgentTasks(msgs []*message.Message, toolResults map[string]mess
 			if canceled || (params.Blocking && (hasResult || !busy)) {
 				continue
 			}
-			if agent.IsAgentWaitCall(tc.Name, tc.Input) {
+			if agent.IsAgentControlCall(tc.Name, tc.Input) {
 				continue
 			}
 			task := &agentTask{

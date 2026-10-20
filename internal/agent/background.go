@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -70,12 +71,61 @@ type liveInbox struct {
 	mu      sync.Mutex
 	items   map[string][]SubagentInboxMessage
 	signals signalMap
+	// steerable holds the child sessions whose run is live and still
+	// takes steps, so a steering message recorded for one is read.
+	steerable map[string]bool
 }
+
+// errSubagentNotRunning is returned for steering a child whose run has
+// ended or never started: it takes no further step to read the message.
+var errSubagentNotRunning = errors.New("agent is not running")
 
 func newLiveInbox() *liveInbox {
 	return &liveInbox{
-		items: make(map[string][]SubagentInboxMessage),
+		items:     make(map[string][]SubagentInboxMessage),
+		steerable: make(map[string]bool),
 	}
+}
+
+// openSteering marks a child session's run as live, so steering
+// messages for it are accepted.
+func (in *liveInbox) openSteering(childSessionID string) {
+	in.mu.Lock()
+	defer in.mu.Unlock()
+	in.steerable[childSessionID] = true
+}
+
+// closeSteering ends a child session's run for steering and returns the
+// steering messages it never read. Under the same lock as
+// recordSteering, so a message is either returned here or refused
+// there, never lost in between.
+func (in *liveInbox) closeSteering(childSessionID string) []SubagentInboxMessage {
+	in.mu.Lock()
+	defer in.mu.Unlock()
+	delete(in.steerable, childSessionID)
+	unread := in.items[childSessionID]
+	delete(in.items, childSessionID)
+	return unread
+}
+
+// isSteerable reports whether a child session's run accepts steering.
+func (in *liveInbox) isSteerable(childSessionID string) bool {
+	in.mu.Lock()
+	defer in.mu.Unlock()
+	return in.steerable[childSessionID]
+}
+
+// recordSteering queues a steering message for a live child run.
+func (in *liveInbox) recordSteering(childSessionID string, msg SubagentInboxMessage) error {
+	in.mu.Lock()
+	defer in.mu.Unlock()
+	if !in.steerable[childSessionID] {
+		return errSubagentNotRunning
+	}
+	if pending, ok := in.appendLocked(childSessionID, msg); !ok {
+		return fmt.Errorf("the agent already has %d unread messages pending; wait for it to take a step", pending)
+	}
+	return nil
 }
 
 // signalChan returns the current wakeup channel for a session. Fetch it
@@ -95,15 +145,25 @@ func (in *liveInbox) notify(parentSessionID string) {
 func (in *liveInbox) record(parentSessionID string, msg SubagentInboxMessage) error {
 	in.mu.Lock()
 	defer in.mu.Unlock()
-	pending := in.items[parentSessionID]
-	if len(pending) >= maxLiveInboxMessages {
+	if pending, ok := in.appendLocked(parentSessionID, msg); !ok {
 		return fmt.Errorf(
 			"the orchestrator already has %d unread messages pending and is not reading them; stop sending messages and finish your run",
-			len(pending),
+			pending,
 		)
 	}
-	in.items[parentSessionID] = append(pending, msg)
 	return nil
+}
+
+// appendLocked appends under the held lock unless the session already
+// has the capped number of messages pending. It returns the pending
+// count and whether the message was appended.
+func (in *liveInbox) appendLocked(sessionID string, msg SubagentInboxMessage) (int, bool) {
+	pending := in.items[sessionID]
+	if len(pending) >= maxLiveInboxMessages {
+		return len(pending), false
+	}
+	in.items[sessionID] = append(pending, msg)
+	return len(pending) + 1, true
 }
 
 // drain takes every pending message for a session.

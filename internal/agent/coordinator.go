@@ -2367,6 +2367,7 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (r
 		c.subagentCancels.Set(session.ID, cancelRun)
 		defer c.subagentCancels.Del(session.ID)
 	}
+	c.openSubagentSteering(session.ID)
 
 	// Register with the runtime tracker and finish on return. finalStatus is
 	// captured by the deferred call and updated below based on the outcome;
@@ -2383,6 +2384,7 @@ func (c *coordinator) runSubAgent(ctx context.Context, params subAgentParams) (r
 	// parent turn (and its context) may already be gone, while each hook's
 	// own timeout still bounds its runtime.
 	defer func() {
+		c.closeSubagentSteering(session.ID, &resp)
 		// Inbox first: messages the sub-agent sent via send_message are
 		// delivered with the result even when the run failed or was
 		// cancelled — that guarantee is the tool's whole point.
@@ -2492,6 +2494,7 @@ func (c *coordinator) runSubAgentBackground(ctx context.Context, session session
 	if c.subagentCancels != nil {
 		c.subagentCancels.Set(session.ID, cancelRun)
 	}
+	c.openSubagentSteering(session.ID)
 	c.runtime.Register(params.SessionID, session.ID, params.AgentName, params.AgentColor, params.AgentModel)
 
 	// The slot transfers to the run: released when the child finishes, not
@@ -2515,6 +2518,9 @@ func (c *coordinator) runSubAgentBackground(ctx context.Context, session session
 			if c.subagentCancels != nil {
 				c.subagentCancels.Del(session.ID)
 			}
+			if c.liveInbox != nil {
+				c.liveInbox.closeSteering(session.ID)
+			}
 			cancelRun()
 			releaseSlot()
 			c.runtime.Finish(session.ID, finalStatus)
@@ -2528,6 +2534,7 @@ func (c *coordinator) runSubAgentBackground(ctx context.Context, session session
 		})
 		resp, status := c.executeSubAgentRun(runCtx, context.WithoutCancel(ctx), session, params)
 		finalStatus = status
+		c.closeSubagentSteering(session.ID, &resp)
 
 		// A background child's send_message output goes to the live inbox
 		// directly; forward anything that nonetheless landed in the
@@ -2614,8 +2621,8 @@ func (c *coordinator) notifySubagentInbox(parentSessionID string) {
 // finished run never takes another step, so the message could not be
 // delivered.
 func (c *coordinator) SteerSubagent(ctx context.Context, childSessionID, text string) error {
-	if _, running := c.subagentCancels.Get(childSessionID); !running {
-		return fmt.Errorf("agent is not running")
+	if c.liveInbox == nil || !c.liveInbox.isSteerable(childSessionID) {
+		return errSubagentNotRunning
 	}
 	msg, err := c.messages.Create(ctx, childSessionID, message.CreateMessageParams{
 		Role:  message.User,
@@ -2624,17 +2631,44 @@ func (c *coordinator) SteerSubagent(ctx context.Context, childSessionID, text st
 	if err != nil {
 		return fmt.Errorf("persist steering message: %w", err)
 	}
-	if c.liveInbox == nil {
-		return nil
-	}
-	if err := c.liveInbox.record(childSessionID, SubagentInboxMessage{
+	if err := c.liveInbox.recordSteering(childSessionID, SubagentInboxMessage{
 		ChildSessionID: childSessionID,
 		Text:           text,
 		Steering:       &msg,
 	}); err != nil {
+		if deleteErr := c.messages.Delete(context.WithoutCancel(ctx), msg.ID); deleteErr != nil {
+			return errors.Join(err, fmt.Errorf("remove undelivered steering message: %w", deleteErr))
+		}
 		return err
 	}
 	return nil
+}
+
+// openSubagentSteering marks a child run as accepting steering; see
+// liveInbox.openSteering.
+func (c *coordinator) openSubagentSteering(childSessionID string) {
+	if c.liveInbox != nil {
+		c.liveInbox.openSteering(childSessionID)
+	}
+}
+
+// closeSubagentSteering stops a finished child run from accepting
+// steering and reports any steering it never read on resp, so a message
+// that arrived after the run's last step is not silently dropped.
+func (c *coordinator) closeSubagentSteering(childSessionID string, resp *fantasy.ToolResponse) {
+	if c.liveInbox == nil {
+		return
+	}
+	unread := c.liveInbox.closeSteering(childSessionID)
+	if len(unread) == 0 {
+		return
+	}
+	var b strings.Builder
+	b.WriteString("\n\n## Messages that arrived after this agent's last step (not read)\n")
+	for i, msg := range unread {
+		fmt.Fprintf(&b, "%d. %s\n", i+1, msg.Text)
+	}
+	resp.Content += b.String()
 }
 
 // NotifyQueueArrival implements QueueArrivalNotifier: a prompt was

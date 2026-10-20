@@ -26,46 +26,24 @@ const (
 // Results are kept, so waiting again on a finished handle returns its
 // result again.
 func (c *coordinator) waitForSubagents(ctx context.Context, parentSession string, requested []string, timeoutSeconds *int) (response fantasy.ToolResponse) {
-	// Deduplicate while preserving order: the response lists each handle
-	// once, in the order asked for.
-	handleSet := make(map[string]bool, len(requested))
-	var handles []string
-	for _, h := range requested {
-		if h == "" || handleSet[h] {
-			continue
-		}
-		handleSet[h] = true
-		handles = append(handles, h)
-	}
+	handles := uniqueHandles(requested)
 	if len(handles) == 0 {
-		for _, h := range c.knownBackgroundHandles(parentSession) {
-			handleSet[h] = true
-			handles = append(handles, h)
-		}
+		handles = c.knownBackgroundHandles(parentSession)
 	}
 	if len(handles) == 0 {
 		return fantasy.NewTextErrorResponse("nothing to wait for: this session has no background agents; give a prompt to dispatch one")
 	}
 
-	var runs []*backgroundRun
+	runs, errResp := c.resolveBackgroundRuns(parentSession, handles)
+	if errResp != nil {
+		return *errResp
+	}
 	defer func() {
 		response = withBackgroundMetadata(response, runs)
 	}()
-	var unknown []string
+	handleSet := make(map[string]bool, len(handles))
 	for _, h := range handles {
-		run, ok := c.backgroundRunFor(parentSession, h)
-		if !ok {
-			unknown = append(unknown, h)
-			continue
-		}
-		runs = append(runs, run)
-	}
-	if len(unknown) > 0 {
-		return fantasy.NewTextErrorResponse(fmt.Sprintf(
-			"unknown background agent handle(s): %s. Handles started by this session: %s",
-			strings.Join(unknown, ", "),
-			strings.Join(c.knownBackgroundHandles(parentSession), ", "),
-		))
+		handleSet[h] = true
 	}
 
 	timeout := defaultWaitTimeoutSeconds

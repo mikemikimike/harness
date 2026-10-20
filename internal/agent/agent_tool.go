@@ -45,31 +45,76 @@ type AgentDispatchParams struct {
 	// dispatches in the background — the call returns a handle immediately
 	// and the orchestrator keeps working while the child runs.
 	Blocking bool `json:"blocking,omitempty"`
-	// Handles and TimeoutSeconds belong to the waiting form: which
-	// background agents to wait for (all of this session's when empty)
-	// and for how long.
+	// Handles names the background agents a wait, message or cancel
+	// applies to; TimeoutSeconds bounds a wait.
 	Handles        []string `json:"handles,omitempty"`
 	TimeoutSeconds *int     `json:"timeout_seconds,omitempty"`
+	// Message is text for running background agents, delivered to each
+	// as a user message before its next step.
+	Message string `json:"message,omitempty"`
+	// Cancel stops the running background agents named in Handles.
+	Cancel bool `json:"cancel,omitempty"`
+}
+
+// AgentCallKind is the form a dispatcher tool call takes, decided by
+// which of its mutually exclusive fields is set.
+type AgentCallKind int
+
+const (
+	AgentCallDispatch AgentCallKind = iota
+	AgentCallWait
+	AgentCallMessage
+	AgentCallCancel
+)
+
+// Kind classifies the call. A call still streaming its input has no
+// fields yet and classifies as a wait until one arrives.
+func (p AgentDispatchParams) Kind() AgentCallKind {
+	switch {
+	case p.Prompt != "":
+		return AgentCallDispatch
+	case p.Message != "":
+		return AgentCallMessage
+	case p.Cancel:
+		return AgentCallCancel
+	default:
+		return AgentCallWait
+	}
+}
+
+// validateForm rejects a call that sets more than one of prompt,
+// message and cancel, which would leave its intent ambiguous.
+func (p AgentDispatchParams) validateForm() error {
+	set := 0
+	for _, isSet := range []bool{p.Prompt != "", p.Message != "", p.Cancel} {
+		if isSet {
+			set++
+		}
+	}
+	if set > 1 {
+		return errors.New(`set at most one of "prompt" (dispatch), "message" (message running agents) and "cancel" (cancel running agents)`)
+	}
+	return nil
 }
 
 const (
 	AgentToolName = toolname.Agent
 )
 
-// IsAgentWaitCall reports whether a tool call is the dispatcher tool's
-// waiting form — the one with no prompt, which blocks until background
-// agents already dispatched report back — rather than a dispatch. A
-// call still streaming its input parses to zero params and therefore
-// looks like a wait until its prompt arrives, which is also when there
-// is an agent worth showing. Single source for the task strip's row
-// filter and the transcript's wait-call renderer.
-func IsAgentWaitCall(name, input string) bool {
-	if name != AgentToolName {
-		return false
-	}
+// AgentCallKindOf classifies a dispatcher tool call's input. Single
+// source for the task strip's row filter and the transcript's renderer
+// choice.
+func AgentCallKindOf(input string) AgentCallKind {
 	var params AgentDispatchParams
 	_ = json.Unmarshal([]byte(input), &params)
-	return params.Prompt == ""
+	return params.Kind()
+}
+
+// IsAgentControlCall reports whether a tool call is the dispatcher tool
+// acting on agents already dispatched (waiting for, messaging or
+// cancelling them) rather than dispatching a new one.
+func IsAgentControlCall(name, input string) bool {
+	return name == AgentToolName && AgentCallKindOf(input) != AgentCallDispatch
 }
 
 // dispatcherTool implements fantasy.AgentTool with a dynamically-built schema.
@@ -170,7 +215,15 @@ func buildAgentDispatchInfo(activeSubagents []*subagents.Subagent) fantasy.ToolI
 			"handles": map[string]any{
 				"type":        "array",
 				"items":       map[string]any{"type": "string"},
-				"description": "Waiting only: handles returned by earlier calls. Empty waits for every background agent this session dispatched.",
+				"description": "Handles returned by earlier calls, for waiting, `message` or `cancel`. Empty waits for every background agent this session dispatched and messages every running one; `cancel` requires them.",
+			},
+			"message": map[string]any{
+				"type":        "string",
+				"description": "Instead of dispatching, send this text to running background agents: each reads it as a user message before its next step. A finished or unknown handle is an error.",
+			},
+			"cancel": map[string]any{
+				"type":        "boolean",
+				"description": "Instead of dispatching, cancel the running background agents in `handles`. Their results are still collected by waiting.",
 			},
 			"timeout_seconds": map[string]any{
 				"type":        "integer",
@@ -289,10 +342,17 @@ func (c *coordinator) agentTool(_ context.Context) (fantasy.AgentTool, error) {
 				// batch completes, and the turn continues.
 				return fantasy.NewTextErrorResponse("session id missing from context"), nil
 			}
-			// No task means "wait for the ones already running": the same
-			// tool is the sync point for what it dispatched.
-			if params.Prompt == "" {
+			if err := params.validateForm(); err != nil {
+				return fantasy.NewTextErrorResponse(err.Error()), nil
+			}
+			switch params.Kind() {
+			case AgentCallWait:
 				return c.waitForSubagents(ctx, sessionID, params.Handles, params.TimeoutSeconds), nil
+			case AgentCallMessage:
+				return c.messageSubagents(ctx, sessionID, params.Handles, params.Message), nil
+			case AgentCallCancel:
+				return c.cancelSubagents(sessionID, params.Handles), nil
+			case AgentCallDispatch:
 			}
 			agentMessageID := tools.GetMessageFromContext(ctx)
 			if agentMessageID == "" {
