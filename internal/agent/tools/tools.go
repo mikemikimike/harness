@@ -56,6 +56,14 @@ func SessionIDOrError(ctx context.Context, purpose string) (string, error) {
 	return sessionID, nil
 }
 
+// fileAccessFailure describes a path a tool could not stat, read or
+// write, such as one the user lacks permission for, and tells the model
+// how to go on. It is the text of an error result, never a Go error: a
+// Go error from a tool aborts the whole turn.
+func fileAccessFailure(op, path string, err error) string {
+	return fmt.Sprintf("Cannot %s %s: %s\n\nCheck the path and its permissions, or use a different file.", op, path, err)
+}
+
 // GetMessageFromContext retrieves the message ID from the context.
 func GetMessageFromContext(ctx context.Context) string {
 	return getContextValue(ctx, MessageIDContextKey, "")

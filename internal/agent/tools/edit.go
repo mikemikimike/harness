@@ -194,13 +194,13 @@ func processEditWithCreation(edit editContext, params EditParams) (fantasy.ToolR
 	if _, err := os.Stat(params.FilePath); err == nil {
 		return fantasy.NewTextErrorResponse(fmt.Sprintf("file already exists: %s", params.FilePath)), nil
 	} else if !os.IsNotExist(err) {
-		return fantasy.ToolResponse{}, fmt.Errorf("failed to access file: %w", err)
+		return fantasy.NewTextErrorResponse(fileAccessFailure("access", params.FilePath, err)), nil
 	}
 
 	// Create parent directories
 	dir := filepath.Dir(params.FilePath)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fantasy.ToolResponse{}, fmt.Errorf("failed to create parent directories: %w", err)
+		return fantasy.NewTextErrorResponse(fileAccessFailure("create the parent directories of", params.FilePath, err)), nil
 	}
 
 	currentContent, failedEdits, whitespaceCorrected, err := applyEditsToContent(&normCache{}, firstEdit.NewString, params.Edits[1:], 1)
@@ -223,7 +223,7 @@ func processEditWithCreation(edit editContext, params EditParams) (fantasy.ToolR
 	written := []byte(currentContent)
 	err = guardedWrite(params.FilePath, nil, written, true)
 	if err != nil {
-		return fantasy.ToolResponse{}, fmt.Errorf("failed to write file: %w", err)
+		return fantasy.NewTextErrorResponse(fileAccessFailure("write", params.FilePath, err)), nil
 	}
 
 	if err := recordFileVersion(edit.ctx, edit.files, sessionID, params.FilePath, "", currentContent); err != nil {

@@ -244,7 +244,7 @@ func loadExistingFile(edit editContext, filePath string, operations []EditOperat
 		if os.IsNotExist(err) {
 			return reject(fmt.Sprintf("file not found: %s", filePath))
 		}
-		return loadedFile{}, nil, fmt.Errorf("failed to access file: %w", err)
+		return reject(fileAccessFailure("access", filePath, err))
 	}
 
 	if fileInfo.IsDir() {
@@ -258,7 +258,7 @@ func loadExistingFile(edit editContext, filePath string, operations []EditOperat
 
 	content, err := os.ReadFile(filePath)
 	if err != nil {
-		return loadedFile{}, nil, fmt.Errorf("failed to read file: %w", err)
+		return reject(fileAccessFailure("read", filePath, err))
 	}
 
 	oldContent, isCrlf := fsext.ToUnixLineEndings(string(content))

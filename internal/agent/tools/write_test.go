@@ -47,3 +47,20 @@ func TestWriteToolWritesEmptyNewFile(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "", string(b))
 }
+
+// TestWriteToolUnwritableDirIsErrorResponse: a file whose parent
+// directory cannot be created is an error result for the model rather
+// than a Go error that aborts the turn.
+func TestWriteToolUnwritableDirIsErrorResponse(t *testing.T) {
+	t.Parallel()
+
+	workingDir := t.TempDir()
+	readOnly := unwritableDir(t, workingDir, "ro")
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
+	tool := NewWriteTool(nil, &mockHistoryService{}, mockFileTrackerService{}, nil, workingDir)
+
+	resp := runFileTool(t, tool, ctx, WriteParams{FilePath: filepath.Join(readOnly, "sub", "new.txt"), Content: "x"})
+	require.True(t, resp.IsError)
+	require.Contains(t, resp.Content, "Cannot create the parent directories of")
+	require.Contains(t, resp.Content, "permissions")
+}

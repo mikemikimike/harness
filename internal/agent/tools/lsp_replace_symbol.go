@@ -119,65 +119,80 @@ func replaceSymbolAction(
 			return fantasy.NewTextErrorResponse(fmt.Sprintf("symbol '%s' not found in %s", params.Symbol, params.FilePath)), nil
 		}
 
-		rng := target.GetRange()
-
-		unlock := lockFile(params.FilePath)
-		defer unlock()
-		content, err := os.ReadFile(params.FilePath)
-		if err != nil {
-			return fantasy.ToolResponse{}, fmt.Errorf("failed to read file: %w", err)
-		}
-
-		lines := strings.Split(string(content), "\n")
-		startLine := int(rng.Start.Line)
-		endLine := int(rng.End.Line)
-		if startLine >= len(lines) || endLine >= len(lines) {
-			return fantasy.NewTextErrorResponse("symbol range exceeds file length"), nil
-		}
-
-		// Cut lines [from, to) and put the replacement there when the
-		// action inserts one.
-		from, to := op.span(startLine, endLine)
-		var inserted []string
-		if op.insert {
-			inserted = strings.Split(params.Replacement, "\n")
-		}
-		newContent := strings.Join(slices.Concat(lines[:from], inserted, lines[to:]), "\n")
-
-		sessionID := GetSessionFromContext(ctx)
-		affected := lineRange(content, startLine, endLine-startLine+1)
-		if err := checkFileEvidence(ctx, tracker, sessionID, params.FilePath, content, []filetracker.Range{affected}); err != nil {
-			return fantasy.NewTextErrorResponse(conflictEvidence(ctx, tracker, sessionID, params.FilePath, content, affected.Start, err).Error()), nil
-		}
-		if err := guardedWrite(params.FilePath, content, []byte(newContent), false); err != nil {
-			if current, readErr := os.ReadFile(params.FilePath); readErr == nil {
-				err = conflictEvidence(ctx, tracker, sessionID, params.FilePath, current, affected.Start, err)
-			}
-			return fantasy.NewTextErrorResponse(err.Error()), nil
-		}
-		if files != nil && sessionID != "" {
-			if err := recordFileVersion(ctx, files, sessionID, params.FilePath, string(content), newContent); err != nil {
-				slog.Warn("Failed to record file history for replace", "path", params.FilePath, "error", err)
-			}
-		}
-
-		filetracker.Advance(ctx, tracker, sessionID, params.FilePath, content, []byte(newContent))
-
-		summary := op.summary(params.Symbol, params.FilePath, startLine+1, endLine+1)
-
-		meta := ReplaceSymbolResponseMetadata{FilePath: params.FilePath, Action: action}
-		diffText, _, _ := diff.GenerateDiff(string(content), newContent, params.FilePath)
-		if len(diffText) <= maxMetadataDiffBytes {
-			meta.Diff = diffText
-		}
-		if len(content) <= maxMetadataContentsBytes && len(newContent) <= maxMetadataContentsBytes {
-			meta.OldContent = string(content)
-			meta.NewContent = newContent
-		}
-		resp := fantasy.NewTextResponse(summary + "\n" + finishFileChange(ctx, lspManager, reg, params.FilePath))
-		resp = fantasy.WithResponseMetadata(resp, meta)
-		return withFileMutations(resp, params.FilePath), nil
+		return spliceSymbol(ctx, lspManager, files, tracker, reg, params, action, op, target.GetRange())
 	}
+}
+
+// spliceSymbol applies op to the lines rng spans in params.FilePath and
+// writes the result back, reporting a file it cannot read or write, or
+// one changed since it was read, as an error result for the model.
+func spliceSymbol(
+	ctx context.Context,
+	lspManager *lsp.Manager,
+	files history.Service,
+	tracker filetracker.Service,
+	reg *presence.Registry,
+	params ReplaceSymbolParams,
+	action string,
+	op replaceSymbolOp,
+	rng protocol.Range,
+) (fantasy.ToolResponse, error) {
+	unlock := lockFile(params.FilePath)
+	defer unlock()
+	content, err := os.ReadFile(params.FilePath)
+	if err != nil {
+		return fantasy.NewTextErrorResponse(fileAccessFailure("read", params.FilePath, err)), nil
+	}
+
+	lines := strings.Split(string(content), "\n")
+	startLine := int(rng.Start.Line)
+	endLine := int(rng.End.Line)
+	if startLine >= len(lines) || endLine >= len(lines) {
+		return fantasy.NewTextErrorResponse("symbol range exceeds file length"), nil
+	}
+
+	// Cut lines [from, to) and put the replacement there when the
+	// action inserts one.
+	from, to := op.span(startLine, endLine)
+	var inserted []string
+	if op.insert {
+		inserted = strings.Split(params.Replacement, "\n")
+	}
+	newContent := strings.Join(slices.Concat(lines[:from], inserted, lines[to:]), "\n")
+
+	sessionID := GetSessionFromContext(ctx)
+	affected := lineRange(content, startLine, endLine-startLine+1)
+	if err := checkFileEvidence(ctx, tracker, sessionID, params.FilePath, content, []filetracker.Range{affected}); err != nil {
+		return fantasy.NewTextErrorResponse(conflictEvidence(ctx, tracker, sessionID, params.FilePath, content, affected.Start, err).Error()), nil
+	}
+	if err := guardedWrite(params.FilePath, content, []byte(newContent), false); err != nil {
+		if current, readErr := os.ReadFile(params.FilePath); readErr == nil {
+			err = conflictEvidence(ctx, tracker, sessionID, params.FilePath, current, affected.Start, err)
+		}
+		return fantasy.NewTextErrorResponse(err.Error()), nil
+	}
+	if files != nil && sessionID != "" {
+		if err := recordFileVersion(ctx, files, sessionID, params.FilePath, string(content), newContent); err != nil {
+			slog.Warn("Failed to record file history for replace", "path", params.FilePath, "error", err)
+		}
+	}
+
+	filetracker.Advance(ctx, tracker, sessionID, params.FilePath, content, []byte(newContent))
+
+	summary := op.summary(params.Symbol, params.FilePath, startLine+1, endLine+1)
+
+	meta := ReplaceSymbolResponseMetadata{FilePath: params.FilePath, Action: action}
+	diffText, _, _ := diff.GenerateDiff(string(content), newContent, params.FilePath)
+	if len(diffText) <= maxMetadataDiffBytes {
+		meta.Diff = diffText
+	}
+	if len(content) <= maxMetadataContentsBytes && len(newContent) <= maxMetadataContentsBytes {
+		meta.OldContent = string(content)
+		meta.NewContent = newContent
+	}
+	resp := fantasy.NewTextResponse(summary + "\n" + finishFileChange(ctx, lspManager, reg, params.FilePath))
+	resp = fantasy.WithResponseMetadata(resp, meta)
+	return withFileMutations(resp, params.FilePath), nil
 }
 
 // findSymbolByName searches for a symbol by name in the document symbol tree.

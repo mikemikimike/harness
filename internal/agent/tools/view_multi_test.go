@@ -115,3 +115,26 @@ func TestViewToolMultiFileCapsEntryCount(t *testing.T) {
 	require.True(t, resp.IsError)
 	require.Contains(t, resp.Content, "At most 10 files per call")
 }
+
+// TestViewToolMultiFileUnreadableEntry: a file the user may not read is
+// a failure section like a missing one, so the call still returns the
+// entries that read instead of aborting the turn.
+func TestViewToolMultiFileUnreadableEntry(t *testing.T) {
+	t.Parallel()
+
+	workingDir := t.TempDir()
+	good := writeViewFixture(t, workingDir, "good.txt", "alpha\n")
+	locked := unreadableFixture(t, workingDir, "locked.txt")
+
+	tool := newViewToolForTest(workingDir)
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
+	resp := runViewTool(t, tool, ctx, ViewParams{
+		Files: []ViewFileRequest{{FilePath: good}, {FilePath: locked}},
+	})
+
+	require.False(t, resp.IsError, "one unreadable file must not fail the call: %q", resp.Content)
+	require.Contains(t, resp.Content, "alpha")
+	require.Contains(t, resp.Content, "path="+strconv.Quote(locked)+" error")
+	require.Contains(t, resp.Content, "Cannot read")
+	require.Contains(t, resp.Content, "permissions")
+}

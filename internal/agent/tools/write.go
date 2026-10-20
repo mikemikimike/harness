@@ -70,7 +70,7 @@ func NewWriteTool(
 			oldBytes, err := os.ReadFile(filePath)
 			create := os.IsNotExist(err)
 			if err != nil && !create {
-				return fantasy.NewTextErrorResponse(fmt.Sprintf("error reading file: %s", err)), nil
+				return fantasy.NewTextErrorResponse(fileAccessFailure("read", filePath, err)), nil
 			}
 			oldContent := string(oldBytes)
 			if !create {
@@ -82,7 +82,7 @@ func NewWriteTool(
 				}
 			}
 			if err := os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil {
-				return fantasy.ToolResponse{}, err
+				return fantasy.NewTextErrorResponse(fileAccessFailure("create the parent directories of", filePath, err)), nil
 			}
 
 			diffText, additions, removals := diff.GenerateDiff(

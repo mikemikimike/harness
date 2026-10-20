@@ -61,7 +61,7 @@ func NewMemoryTool(svc memory.Service) fantasy.AgentTool {
 		func(ctx context.Context, params MemoryParams, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			scope, err := memory.ParseScope(params.Scope)
 			if err != nil {
-				return fantasy.ToolResponse{}, err
+				return fantasy.NewTextErrorResponse(err.Error() + "; omit scope or pass global or repo"), nil
 			}
 			switch params.Action {
 			case "save":
@@ -77,7 +77,7 @@ func NewMemoryTool(svc memory.Service) fantasy.AgentTool {
 			case "delete":
 				return memoryDelete(ctx, svc, params, scope)
 			default:
-				return fantasy.ToolResponse{}, fmt.Errorf("invalid action %q: must be one of save, edit, read, search, list, delete", params.Action)
+				return fantasy.NewTextErrorResponse(fmt.Sprintf("invalid action %q: must be one of save, edit, read, search, list, delete", params.Action)), nil
 			}
 		},
 	)
@@ -93,15 +93,15 @@ func parseCategory(s string) (memory.Category, error) {
 }
 
 func memorySave(ctx context.Context, svc memory.Service, params MemoryParams, scope memory.Scope) (fantasy.ToolResponse, error) {
-	if params.Title == "" {
-		return fantasy.ToolResponse{}, errors.New("title is required for save")
+	if strings.TrimSpace(params.Title) == "" {
+		return fantasy.NewTextErrorResponse("title is required for save; pass a short title for the note"), nil
 	}
-	if params.Content == "" {
-		return fantasy.ToolResponse{}, errors.New("content is required for save")
+	if strings.TrimSpace(params.Content) == "" {
+		return fantasy.NewTextErrorResponse("content is required for save; pass the full note as content"), nil
 	}
 	category, err := parseCategory(params.Category)
 	if err != nil {
-		return fantasy.ToolResponse{}, err
+		return fantasy.NewTextErrorResponse(err.Error()), nil
 	}
 
 	result, err := svc.Save(ctx, memory.SaveInput{
@@ -179,8 +179,8 @@ func pick(matches []memory.Item, scope memory.Scope) (memory.Item, string, bool)
 // duplicate a memory. Omitted category and pinned keep the stored
 // values, and the memory stays in its scope.
 func memoryEdit(ctx context.Context, svc memory.Service, params MemoryParams, scope memory.Scope) (fantasy.ToolResponse, error) {
-	if params.Content == "" {
-		return fantasy.ToolResponse{}, errors.New("content is required for edit")
+	if strings.TrimSpace(params.Content) == "" {
+		return fantasy.NewTextErrorResponse("content is required for edit; pass the full replacement note as content"), nil
 	}
 
 	var existing memory.Item
@@ -194,20 +194,23 @@ func memoryEdit(ctx context.Context, svc memory.Service, params MemoryParams, sc
 		}
 		item, shadowed, ok := pick(matches, scope)
 		if !ok {
-			return fantasy.ToolResponse{}, fmt.Errorf("no memory with id %q: %w", params.ID, memory.ErrNotFound)
+			return memoryNotFound(params.ID)
 		}
 		existing, note = item, shadowed
-	case params.Title != "":
-		item, shadowed, err := resolveByTitle(ctx, svc, params.Title, scope)
+	case strings.TrimSpace(params.Title) != "":
+		item, shadowed, failure, err := resolveByTitle(ctx, svc, params.Title, scope)
 		if err != nil {
 			return fantasy.ToolResponse{}, err
+		}
+		if failure != nil {
+			return *failure, nil
 		}
 		existing, note = item, shadowed
 		// A fuzzy match keeps the stored title: the caller's spelling
 		// is not a rename request.
 		fuzzy = existing.Title != params.Title
 	default:
-		return fantasy.ToolResponse{}, errors.New("id or title is required for edit")
+		return fantasy.NewTextErrorResponse("id or title is required for edit; name the memory to change"), nil
 	}
 
 	title := existing.Title
@@ -216,7 +219,7 @@ func memoryEdit(ctx context.Context, svc memory.Service, params MemoryParams, sc
 	}
 	category, err := parseCategory(params.Category)
 	if err != nil {
-		return fantasy.ToolResponse{}, err
+		return fantasy.NewTextErrorResponse(err.Error()), nil
 	}
 
 	result, err := svc.Save(ctx, memory.SaveInput{
@@ -243,35 +246,52 @@ func memoryEdit(ctx context.Context, svc memory.Service, params MemoryParams, sc
 
 // resolveByTitle finds the memory an edit targets: exact title first,
 // then the ranked search. A single clearly-similar hit is returned as
-// the target; otherwise the closest candidates come back in the error
-// so the caller can retry with an id. It never guesses between
-// several memories.
-func resolveByTitle(ctx context.Context, svc memory.Service, title string, scope memory.Scope) (memory.Item, string, error) {
+// the target; otherwise the failure names the closest candidates so
+// the caller can retry with an id. It never guesses between several
+// memories. The failure is for the model; err is a store failure.
+func resolveByTitle(ctx context.Context, svc memory.Service, title string, scope memory.Scope) (memory.Item, string, *fantasy.ToolResponse, error) {
 	exact, err := svc.LookupTitle(ctx, title)
 	if err != nil {
-		return memory.Item{}, "", err
+		return memory.Item{}, "", nil, err
 	}
 	if item, note, ok := pick(exact, scope); ok {
-		return item, note, nil
+		return item, note, nil, nil
 	}
 
 	matches, err := searchIn(ctx, svc, title, scope)
 	if err != nil {
-		return memory.Item{}, "", err
+		return memory.Item{}, "", nil, err
 	}
 	if len(matches) == 0 {
-		return memory.Item{}, "", fmt.Errorf("no memory titled %q; use save to create it", title)
+		resp := fantasy.NewTextErrorResponse(fmt.Sprintf("no memory titled %q; use save to create it", title))
+		return memory.Item{}, "", &resp, nil
 	}
 
 	best := matches[0]
 	bestSim := memory.Similarity(title, best.Title)
 	if bestSim >= minTitleMatch && (len(matches) == 1 || memory.Similarity(title, matches[1].Title) < bestSim-minTitleMatchMargin) {
-		return best, "", nil
+		return best, "", nil, nil
 	}
 	if len(matches) > 3 {
 		matches = matches[:3]
 	}
-	return memory.Item{}, "", fmt.Errorf("no memory titled %q; closest matches (edit by id):\n%s", title, renderIndex(matches))
+	resp := fantasy.NewTextErrorResponse(fmt.Sprintf("no memory titled %q; closest matches (edit by id):\n%s", title, renderIndex(matches)))
+	return memory.Item{}, "", &resp, nil
+}
+
+// memoryNotFound is the result for an id no memory in reach carries.
+func memoryNotFound(id string) (fantasy.ToolResponse, error) {
+	return fantasy.NewTextErrorResponse(fmt.Sprintf("memory %q not found; list or search memories for the right id", id)), nil
+}
+
+// memoryStoreError turns a failed store call into the tool's result: a
+// memory that went missing between lookup and use is reported to the
+// model like any unknown id, anything else is a failure of the store.
+func memoryStoreError(err error, id string) (fantasy.ToolResponse, error) {
+	if errors.Is(err, memory.ErrNotFound) {
+		return memoryNotFound(id)
+	}
+	return fantasy.ToolResponse{}, err
 }
 
 // searchIn runs a search, narrowed to scope when it is set.
@@ -289,9 +309,9 @@ func searchIn(ctx context.Context, svc memory.Service, query string, scope memor
 // so the follow-up call can name the id.
 func memoryRead(ctx context.Context, svc memory.Service, params MemoryParams, scope memory.Scope) (fantasy.ToolResponse, error) {
 	if params.ID == "" {
-		query := cmp.Or(params.Query, params.Title)
+		query := cmp.Or(strings.TrimSpace(params.Query), strings.TrimSpace(params.Title))
 		if query == "" {
-			return fantasy.ToolResponse{}, errors.New("id or query is required for read")
+			return fantasy.NewTextErrorResponse("id or query is required for read; pass the memory's id, or a query to find it"), nil
 		}
 		matches, err := searchIn(ctx, svc, query, scope)
 		if err != nil {
@@ -311,18 +331,18 @@ func memoryRead(ctx context.Context, svc memory.Service, params MemoryParams, sc
 	}
 	target, note, ok := pick(matches, scope)
 	if !ok {
-		return fantasy.ToolResponse{}, fmt.Errorf("%w: %s", memory.ErrNotFound, params.ID)
+		return memoryNotFound(params.ID)
 	}
 	item, err := svc.Get(ctx, target.Scope, target.ID)
 	if err != nil {
-		return fantasy.ToolResponse{}, err
+		return memoryStoreError(err, params.ID)
 	}
 	return fantasy.NewTextResponse(renderItem(item) + note), nil
 }
 
 func memorySearch(ctx context.Context, svc memory.Service, params MemoryParams, scope memory.Scope) (fantasy.ToolResponse, error) {
-	if params.Query == "" {
-		return fantasy.ToolResponse{}, errors.New("query is required for search")
+	if strings.TrimSpace(params.Query) == "" {
+		return fantasy.NewTextErrorResponse("query is required for search; pass the words to search for, or use list to see every memory"), nil
 	}
 	items, err := searchIn(ctx, svc, params.Query, scope)
 	if err != nil {
@@ -344,7 +364,7 @@ func memoryList(ctx context.Context, svc memory.Service, scope memory.Scope) (fa
 
 func memoryDelete(ctx context.Context, svc memory.Service, params MemoryParams, scope memory.Scope) (fantasy.ToolResponse, error) {
 	if params.ID == "" {
-		return fantasy.ToolResponse{}, errors.New("id is required for delete")
+		return fantasy.NewTextErrorResponse("id is required for delete; list or search memories for the id"), nil
 	}
 	matches, err := svc.Lookup(ctx, params.ID)
 	if err != nil {
@@ -352,10 +372,10 @@ func memoryDelete(ctx context.Context, svc memory.Service, params MemoryParams, 
 	}
 	item, note, ok := pick(matches, scope)
 	if !ok {
-		return fantasy.ToolResponse{}, fmt.Errorf("%w: %s", memory.ErrNotFound, params.ID)
+		return memoryNotFound(params.ID)
 	}
 	if err := svc.Delete(ctx, item.Scope, item.ID); err != nil {
-		return fantasy.ToolResponse{}, err
+		return memoryStoreError(err, params.ID)
 	}
 	return fantasy.NewTextResponse(fmt.Sprintf("Deleted memory %s", item.IndexLine()) + note), nil
 }

@@ -23,6 +23,16 @@ func runMemoryTool(t *testing.T, tool fantasy.AgentTool, input string) fantasy.T
 	return resp
 }
 
+// requireMemoryToolError runs input and requires an error result
+// containing want, with no Go error: fantasy aborts the turn on one.
+func requireMemoryToolError(t *testing.T, tool fantasy.AgentTool, input, want string) fantasy.ToolResponse {
+	t.Helper()
+	resp := runMemoryTool(t, tool, input)
+	require.True(t, resp.IsError, "%s: %q", input, resp.Content)
+	require.Contains(t, resp.Content, want, input)
+	return resp
+}
+
 func TestMemoryToolRoundTrip(t *testing.T) {
 	tool := newMemoryToolForTest(t)
 
@@ -86,21 +96,18 @@ func TestMemoryToolEdit(t *testing.T) {
 	require.Contains(t, byID.Content, "just ci")
 	require.Contains(t, byID.Content, "(repo, reference)")
 
-	// A title that does not exist is an error pointing at save.
-	_, err := tool.Run(t.Context(), fantasy.ToolCall{Input: `{"action":"edit","title":"Typo Title","content":"x"}`})
-	require.ErrorContains(t, err, "use save to create it")
+	// A title that does not exist is an error result pointing at save.
+	requireMemoryToolError(t, tool, `{"action":"edit","title":"Typo Title","content":"x"}`, "use save to create it")
 
-	// Unknown id is an error as well.
-	_, err = tool.Run(t.Context(), fantasy.ToolCall{Input: `{"action":"edit","id":"nope","content":"x"}`})
-	require.ErrorContains(t, err, "no memory with id")
+	// Unknown id is an error result as well.
+	requireMemoryToolError(t, tool, `{"action":"edit","id":"nope","content":"x"}`, `memory "nope" not found`)
 
 	// Content is required.
-	_, err = tool.Run(t.Context(), fantasy.ToolCall{Input: `{"action":"edit","title":"Build commands"}`})
-	require.ErrorContains(t, err, "content is required")
+	requireMemoryToolError(t, tool, `{"action":"edit","title":"Build commands"}`, "content is required")
 
-	// Neither id nor title is an error.
-	_, err = tool.Run(t.Context(), fantasy.ToolCall{Input: `{"action":"edit","content":"x"}`})
-	require.ErrorContains(t, err, "id or title is required")
+	// Neither id nor title is an error result.
+	requireMemoryToolError(t, tool, `{"action":"edit","content":"x"}`, "id or title is required")
+	requireMemoryToolError(t, tool, `{"action":"edit","title":"  ","content":"x"}`, "id or title is required")
 }
 
 func TestMemoryToolReadByQuery(t *testing.T) {
@@ -132,26 +139,30 @@ func TestMemoryToolReadByQuery(t *testing.T) {
 	require.Contains(t, none.Content, "no memory matching")
 }
 
+// TestMemoryToolValidation holds every input the model can get wrong to
+// an error result rather than a Go error, which would abort the turn
+// instead of letting the model retry.
 func TestMemoryToolValidation(t *testing.T) {
 	tool := newMemoryToolForTest(t)
 
-	_, err := tool.Run(t.Context(), fantasy.ToolCall{Input: `{"action":"flurb"}`})
-	require.ErrorContains(t, err, "invalid action")
-
-	_, err = tool.Run(t.Context(), fantasy.ToolCall{Input: `{"action":"save","content":"no title"}`})
-	require.ErrorContains(t, err, "title is required")
-
-	_, err = tool.Run(t.Context(), fantasy.ToolCall{Input: `{"action":"read"}`})
-	require.ErrorContains(t, err, "id or query is required")
-
-	_, err = tool.Run(t.Context(), fantasy.ToolCall{Input: `{"action":"search"}`})
-	require.ErrorContains(t, err, "query is required")
-
-	_, err = tool.Run(t.Context(), fantasy.ToolCall{Input: `{"action":"save","title":"t","content":"c","category":"bogus"}`})
-	require.ErrorContains(t, err, "invalid category")
-
-	_, err = tool.Run(t.Context(), fantasy.ToolCall{Input: `{"action":"read","id":"nope"}`})
-	require.ErrorContains(t, err, "not found")
+	cases := map[string]string{
+		`{"action":"flurb"}`:                                             "invalid action",
+		`{"action":"save","content":"no title"}`:                         "title is required",
+		`{"action":"save","title":"  ","content":"c"}`:                   "title is required",
+		`{"action":"save","title":"t"}`:                                  "content is required",
+		`{"action":"save","title":"t","content":"  "}`:                   "content is required",
+		`{"action":"read"}`:                                              "id or query is required",
+		`{"action":"search"}`:                                            "query is required",
+		`{"action":"search","query":"  "}`:                               "query is required",
+		`{"action":"delete"}`:                                            "id is required",
+		`{"action":"save","title":"t","content":"c","category":"bogus"}`: "invalid category",
+		`{"action":"list","scope":"galaxy"}`:                             "invalid scope",
+		`{"action":"read","id":"nope"}`:                                  "not found",
+		`{"action":"delete","id":"nope"}`:                                "not found",
+	}
+	for input, want := range cases {
+		requireMemoryToolError(t, tool, input, want)
+	}
 }
 
 func TestMemoryToolEditFuzzyTitle(t *testing.T) {
@@ -181,10 +192,9 @@ func TestMemoryToolEditAmbiguousTitleAsks(t *testing.T) {
 	runMemoryTool(t, tool, `{"action":"save","title":"Test commands","content":"just test"}`)
 
 	// A title that plausibly matches several memories must not guess.
-	_, err := tool.Run(t.Context(), fantasy.ToolCall{Input: `{"action":"edit","title":"commands","content":"x"}`})
-	require.ErrorContains(t, err, "closest matches")
-	require.ErrorContains(t, err, "[build-commands]")
-	require.ErrorContains(t, err, "[test-commands]")
+	ambiguous := requireMemoryToolError(t, tool, `{"action":"edit","title":"commands","content":"x"}`, "closest matches")
+	require.Contains(t, ambiguous.Content, "[build-commands]")
+	require.Contains(t, ambiguous.Content, "[test-commands]")
 
 	// Editing by id still works when the title is ambiguous.
 	byID := runMemoryTool(t, tool, `{"action":"edit","id":"build-commands","content":"go build ./..."}`)
@@ -241,8 +251,6 @@ func TestMemoryToolScopes(t *testing.T) {
 	read = runMemoryTool(t, tool, `{"action":"read","id":"style"}`)
 	require.Contains(t, read.Content, "terse, no emojis")
 
-	_, err := tool.Run(t.Context(), fantasy.ToolCall{Input: `{"action":"delete","id":"style","scope":"repo"}`})
-	require.ErrorContains(t, err, "not found")
-	_, err = tool.Run(t.Context(), fantasy.ToolCall{Input: `{"action":"list","scope":"galaxy"}`})
-	require.ErrorContains(t, err, "invalid scope")
+	requireMemoryToolError(t, tool, `{"action":"delete","id":"style","scope":"repo"}`, "not found")
+	requireMemoryToolError(t, tool, `{"action":"list","scope":"galaxy"}`, "invalid scope")
 }

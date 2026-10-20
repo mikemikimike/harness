@@ -130,3 +130,29 @@ func TestEditRejectsMultipleMatchesWithoutReplaceAll(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "alpha\nbeta\nalpha\n", string(content))
 }
+
+// TestEditInaccessibleFileIsErrorResponse: a file the user may not read,
+// or a new file in a directory they may not write, is an error result
+// for the model rather than a Go error that aborts the turn.
+func TestEditInaccessibleFileIsErrorResponse(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	locked := unreadableFixture(t, dir, "locked.txt")
+	readOnly := unwritableDir(t, dir, "ro")
+
+	ctx := context.WithValue(t.Context(), SessionIDContextKey, "s")
+	edit := NewEditTool(nil, &mockHistoryService{}, filetracker.NewService(nil), nil, dir)
+
+	cases := map[string]EditParams{
+		"unreadable":    {FilePath: locked, Edits: []EditOperation{{OldString: "secret", NewString: "public"}}},
+		"no parent dir": {FilePath: filepath.Join(readOnly, "sub", "new.txt"), Edits: []EditOperation{{NewString: "x"}}},
+		"no write":      {FilePath: filepath.Join(readOnly, "new.txt"), Edits: []EditOperation{{NewString: "x"}}},
+		"no stat":       {FilePath: filepath.Join(locked, "child.txt"), Edits: []EditOperation{{NewString: "x"}}},
+	}
+	for name, params := range cases {
+		resp := runFileTool(t, edit, ctx, params)
+		require.True(t, resp.IsError, name)
+		require.Contains(t, resp.Content, "Cannot ", name)
+		require.Contains(t, resp.Content, "permissions", name)
+	}
+}

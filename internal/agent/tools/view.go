@@ -191,7 +191,7 @@ func (v *viewTool) viewOneFile(ctx context.Context, params ViewParams) (viewFile
 
 			return viewFileContent{}, failureResponse(fmt.Sprintf("File not found: %s", filePath)), nil
 		}
-		return viewFileContent{}, nil, fmt.Errorf("error accessing file: %w", err)
+		return viewFileContent{}, unreadableResponse(filePath, err), nil
 	}
 
 	// Check if it's a directory
@@ -221,7 +221,7 @@ func (v *viewTool) viewOneFile(ctx context.Context, params ViewParams) (viewFile
 
 		imageData, readErr := os.ReadFile(filePath)
 		if readErr != nil {
-			return viewFileContent{}, nil, fmt.Errorf("error reading image file: %w", readErr)
+			return viewFileContent{}, unreadableResponse(filePath, readErr), nil
 		}
 
 		// Some tools save files with a mismatched extension
@@ -249,7 +249,7 @@ func (v *viewTool) viewOneFile(ctx context.Context, params ViewParams) (viewFile
 			return viewFileContent{}, failureResponse(fmt.Sprintf("Content section is too large (%d bytes). Maximum size is %d bytes",
 				tooLarge.Size, tooLarge.Max)), nil
 		}
-		return viewFileContent{}, nil, fmt.Errorf("error reading file: %w", err)
+		return viewFileContent{}, unreadableResponse(filePath, err), nil
 	}
 	content := read.content
 	if !utf8.ValidString(content) {
@@ -349,8 +349,8 @@ func (v *viewTool) viewFiles(ctx context.Context, files []ViewFileRequest) (fant
 	}
 	wg.Wait()
 
-	// A hard failure (a failed read error, a cancelled context) aborts the
-	// call, as the sequential version did at the first one it hit.
+	// A hard failure (no session to read for) aborts the call; a file
+	// that cannot be read is a failure section like any other.
 	for _, err := range hardErrs {
 		if err != nil {
 			return fantasy.ToolResponse{}, err
@@ -430,6 +430,13 @@ func NewViewTool(
 func failureResponse(message string) *fantasy.ToolResponse {
 	resp := fantasy.NewTextErrorResponse(message)
 	return &resp
+}
+
+// unreadableResponse reports a path the tool could not stat, open or
+// read, such as one the user lacks permission for, as a failure the
+// model can work around rather than one that aborts its turn.
+func unreadableResponse(path string, err error) *fantasy.ToolResponse {
+	return failureResponse(fileAccessFailure("read", path, err))
 }
 
 // addLineNumbers prefixes each line with its line number and a pipe. No

@@ -13,7 +13,7 @@ const MaxDirectoryEntries = 200
 func viewDirectory(path string, offset, limit int) (viewFileContent, *fantasy.ToolResponse, error) {
 	entries, err := os.ReadDir(path)
 	if err != nil {
-		return viewFileContent{}, nil, err
+		return viewFileContent{}, unreadableResponse(path, err), nil
 	}
 	if limit <= 0 {
 		limit = MaxDirectoryEntries

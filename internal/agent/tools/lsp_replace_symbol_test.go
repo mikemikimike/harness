@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/x/powernap/pkg/lsp/protocol"
 	"github.com/stretchr/testify/require"
 )
 
@@ -28,4 +29,19 @@ func TestReplaceSymbolOpsSpans(t *testing.T) {
 		got := strings.Join(slices.Concat(lines[:from], inserted, lines[to:]), "|")
 		require.Equal(t, want, got, action)
 	}
+}
+
+// TestSpliceSymbolUnreadableFileIsErrorResponse: a file that cannot be
+// read once its symbol is found is an error result for the model rather
+// than a Go error that aborts the turn.
+func TestSpliceSymbolUnreadableFileIsErrorResponse(t *testing.T) {
+	t.Parallel()
+	locked := unreadableFixture(t, t.TempDir(), "locked.go")
+
+	params := ReplaceSymbolParams{Symbol: "f", FilePath: locked, Action: "delete"}
+	resp, err := spliceSymbol(t.Context(), nil, nil, nil, nil, params, "delete", replaceSymbolOps["delete"], protocol.Range{})
+	require.NoError(t, err)
+	require.True(t, resp.IsError)
+	require.Contains(t, resp.Content, "Cannot read")
+	require.Contains(t, resp.Content, "permissions")
 }

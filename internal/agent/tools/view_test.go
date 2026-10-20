@@ -332,3 +332,25 @@ func TestSniffImageMimeType(t *testing.T) {
 		})
 	}
 }
+
+// TestViewToolUnreadablePathIsErrorResponse: a file or directory the
+// user may not read is an error result telling the model what to do,
+// never a Go error, which would abort the turn.
+func TestViewToolUnreadablePathIsErrorResponse(t *testing.T) {
+	t.Parallel()
+
+	workingDir := t.TempDir()
+	locked := unreadableFixture(t, workingDir, "locked.txt")
+	lockedDir := filepath.Join(workingDir, "locked")
+	require.NoError(t, os.Mkdir(lockedDir, 0o000))
+	t.Cleanup(func() { _ = os.Chmod(lockedDir, 0o755) })
+
+	tool := newViewToolForTest(workingDir)
+	ctx := context.WithValue(context.Background(), SessionIDContextKey, "test-session")
+	for _, path := range []string{locked, lockedDir, filepath.Join(lockedDir, "inner.txt")} {
+		resp := runViewTool(t, tool, ctx, ViewParams{FilePath: path})
+		require.True(t, resp.IsError, path)
+		require.Contains(t, resp.Content, "Cannot read", path)
+		require.Contains(t, resp.Content, "permissions", path)
+	}
+}
