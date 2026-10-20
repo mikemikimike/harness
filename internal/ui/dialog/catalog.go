@@ -100,7 +100,7 @@ func (m customMenu) items() []*CommandItem {
 	var items []*CommandItem
 	for _, cmd := range m.commands() {
 		names := commands.InvocationNames(cmd.Name)
-		item := NewCommandItem(m.c.com.Styles, "custom_"+cmd.ID, cmd.Name, "", ActionRunCustomCommand{Command: cmd}).
+		item := NewCommandItem(m.c.com.Styles, "custom_"+cmd.ID, cmd.Name, ActionRunCustomCommand{Command: cmd}).
 			WithSlashNames(names...).
 			// The source prefix (project:/user:/system:) labels where the
 			// command lives, not its name; match on the name after it.
@@ -125,7 +125,7 @@ func (m mcpMenu) hasItems() bool { return len(m.c.mcpPrompts) > 0 }
 func (m mcpMenu) items() []*CommandItem {
 	var items []*CommandItem
 	for _, prompt := range m.c.mcpPrompts {
-		item := NewCommandItem(m.c.com.Styles, "mcp_"+prompt.ID, prompt.PromptID, "", ActionRunMCPPrompt{Prompt: prompt}).
+		item := NewCommandItem(m.c.com.Styles, "mcp_"+prompt.ID, prompt.PromptID, ActionRunMCPPrompt{Prompt: prompt}).
 			WithSlashNames(prompt.ID)
 		if prompt.Description != "" {
 			item = item.WithDescription(prompt.Description)
@@ -142,42 +142,41 @@ func (c *Catalog) menus() []commandMenu {
 	return []commandMenu{systemMenu{c}, customMenu{c: c, skills: true}, customMenu{c: c}, mcpMenu{c}}
 }
 
-// defaultCommands returns the list of default system commands.
-// defaultCommands returns the list of default system commands. Shortcut
-// labels follow the keymap: a rebound action shows its new key here, and
-// the palette matches the label literally, so the two never drift apart.
+// defaultCommands returns the list of default system commands. Each
+// shortcut is the action's own binding: a rebound action shows its new
+// key here and fires on every key it is bound to.
 func (c *Catalog) defaultCommands() []*CommandItem {
 	km := c.com.KeyMap()
 	commands := []*CommandItem{
-		NewCommandItem(c.com.Styles, "new_session", "New Session", km.Chat.NewSession.Help().Key, ActionNewSession{}).WithAliases("clear"),
-		NewCommandItem(c.com.Styles, "switch_session", "Sessions", km.Sessions.Help().Key, ActionOpenDialog{SessionsID}).WithAliases("resume", "switch"),
-		NewCommandItem(c.com.Styles, "switch_model", "Switch Model", km.Models.Help().Key, ActionOpenDialog{ModelsID}),
-		NewCommandItem(c.com.Styles, "connect_provider", "Connect Provider", "", ActionOpenDialog{ConnectID}).WithAliases("provider", "auth", "login"),
-		NewCommandItem(c.com.Styles, "switch_theme", "Switch Theme", km.Themes.Help().Key, ActionOpenDialog{ThemesID}),
-		NewCommandItem(c.com.Styles, "mcp_servers", "MCP Servers", "", ActionOpenDialog{DialogID: MCPServersID}).WithAliases("mcp"),
-		NewCommandItem(c.com.Styles, "lsp_servers", "LSP Servers", "", ActionOpenDialog{DialogID: LSPServersID}).WithAliases("lsp"),
+		NewCommandItem(c.com.Styles, "new_session", "New Session", ActionNewSession{}).WithShortcut(km.Chat.NewSession).WithAliases("clear"),
+		NewCommandItem(c.com.Styles, "switch_session", "Sessions", ActionOpenDialog{SessionsID}).WithShortcut(km.Sessions).WithAliases("resume", "switch"),
+		NewCommandItem(c.com.Styles, "switch_model", "Switch Model", ActionOpenDialog{ModelsID}).WithShortcut(km.Models),
+		NewCommandItem(c.com.Styles, "connect_provider", "Connect Provider", ActionOpenDialog{ConnectID}).WithAliases("provider", "auth", "login"),
+		NewCommandItem(c.com.Styles, "switch_theme", "Switch Theme", ActionOpenDialog{ThemesID}).WithShortcut(km.Themes),
+		NewCommandItem(c.com.Styles, "mcp_servers", "MCP Servers", ActionOpenDialog{DialogID: MCPServersID}).WithAliases("mcp"),
+		NewCommandItem(c.com.Styles, "lsp_servers", "LSP Servers", ActionOpenDialog{DialogID: LSPServersID}).WithAliases("lsp"),
 	}
 
 	// Only show compact command if there's an active session
 	if c.state.hasSession() {
-		commands = append(commands, NewCommandItem(c.com.Styles, "summarize", "Summarize Session", "", ActionSummarize{SessionID: c.state.SessionID}))
-		commands = append(commands, NewCommandItem(c.com.Styles, "rewind", "Rewind to Earlier Turn", "", ActionOpenDialog{RewindID}))
-		commands = append(commands, NewCommandItem(c.com.Styles, "compact", "Compact Session", "", ActionCompact{SessionID: c.state.SessionID}))
+		commands = append(commands, NewCommandItem(c.com.Styles, "summarize", "Summarize Session", ActionSummarize{SessionID: c.state.SessionID}))
+		commands = append(commands, NewCommandItem(c.com.Styles, "rewind", "Rewind to Earlier Turn", ActionOpenDialog{RewindID}))
+		commands = append(commands, NewCommandItem(c.com.Styles, "compact", "Compact Session", ActionCompact{SessionID: c.state.SessionID}))
 	}
 
-	commands = append(commands, NewCommandItem(c.com.Styles, "goal", "Set Goal", "", ActionSetGoal{}))
+	commands = append(commands, NewCommandItem(c.com.Styles, "goal", "Set Goal", ActionSetGoal{}))
 	if c.state.hasSession() && c.state.HasGoal {
-		commands = append(commands, NewCommandItem(c.com.Styles, "clear_goal", "Clear Goal", "", ActionClearGoal{}))
+		commands = append(commands, NewCommandItem(c.com.Styles, "clear_goal", "Clear Goal", ActionClearGoal{}))
 	}
 
 	// Only show the export command when there is a conversation to export
 	if c.state.hasSession() {
-		commands = append(commands, NewCommandItem(c.com.Styles, "export_conversation", "Export Conversation", km.ExportConversation.Help().Key, ActionExportConversation{SessionID: c.state.SessionID}).WithAliases("export", "transcript", "copy"))
+		commands = append(commands, NewCommandItem(c.com.Styles, "export_conversation", "Export Conversation", ActionExportConversation{SessionID: c.state.SessionID}).WithShortcut(km.ExportConversation).WithAliases("export", "transcript", "copy"))
 	}
 
 	// Only show the save summary command if the session already has one
 	if c.state.hasSession() && c.state.HasSummary {
-		commands = append(commands, NewCommandItem(c.com.Styles, "save_summary", "Save Session Summary", "", ActionSaveSummary{SessionID: c.state.SessionID}))
+		commands = append(commands, NewCommandItem(c.com.Styles, "save_summary", "Save Session Summary", ActionSaveSummary{SessionID: c.state.SessionID}))
 	}
 
 	// Add reasoning toggle for models that support it
@@ -194,12 +193,12 @@ func (c *Catalog) defaultCommands() []*CommandItem {
 				if selectedModel.Think {
 					status = "Disable"
 				}
-				commands = append(commands, NewCommandItem(c.com.Styles, "toggle_thinking", status+" Thinking Mode", "", ActionToggleThinking{}))
+				commands = append(commands, NewCommandItem(c.com.Styles, "toggle_thinking", status+" Thinking Mode", ActionToggleThinking{}))
 			}
 
 			// OpenAI models: reasoning effort dialog
 			if len(model.ReasoningLevels) > 0 {
-				commands = append(commands, NewCommandItem(c.com.Styles, "select_reasoning_effort", "Select Reasoning Effort", "", ActionOpenDialog{
+				commands = append(commands, NewCommandItem(c.com.Styles, "select_reasoning_effort", "Select Reasoning Effort", ActionOpenDialog{
 					DialogID: ReasoningID,
 				}))
 			}
@@ -211,17 +210,17 @@ func (c *Catalog) defaultCommands() []*CommandItem {
 	// because os.Getenv does IO is breaks the TEA paradigm and is generally an
 	// antipattern.
 	if os.Getenv("EDITOR") != "" {
-		commands = append(commands, NewCommandItem(c.com.Styles, "open_external_editor", "Open External Editor", km.Editor.OpenEditor.Help().Key, ActionExternalEditor{}))
+		commands = append(commands, NewCommandItem(c.com.Styles, "open_external_editor", "Open External Editor", ActionExternalEditor{}).WithShortcut(km.Editor.OpenEditor))
 	}
 
 	// Add a command for selecting notification style via picker dialog.
 	notificationLabel := "Notification Style"
-	commands = append(commands, NewCommandItem(c.com.Styles, "select_notifications", notificationLabel, "", ActionOpenDialog{DialogID: NotificationsID}))
+	commands = append(commands, NewCommandItem(c.com.Styles, "select_notifications", notificationLabel, ActionOpenDialog{DialogID: NotificationsID}))
 
 	commands = append(
 		commands,
-		NewCommandItem(c.com.Styles, "toggle_help", "Toggle Help", km.Help.Help().Key, ActionToggleHelp{}),
-		NewCommandItem(c.com.Styles, "init", "Initialize Project", "", ActionInitializeProject{}),
+		NewCommandItem(c.com.Styles, "toggle_help", "Toggle Help", ActionToggleHelp{}).WithShortcut(km.Help),
+		NewCommandItem(c.com.Styles, "init", "Initialize Project", ActionInitializeProject{}),
 	)
 
 	// Add mouse support toggle.
@@ -229,11 +228,11 @@ func (c *Catalog) defaultCommands() []*CommandItem {
 	if cfg != nil && cfg.Options != nil && !cfg.Options.TUI.MouseEnabled() {
 		mouseLabel = "Enable Mouse"
 	}
-	commands = append(commands, NewCommandItem(c.com.Styles, "toggle_mouse", mouseLabel, "", ActionToggleMouseSupport{}))
+	commands = append(commands, NewCommandItem(c.com.Styles, "toggle_mouse", mouseLabel, ActionToggleMouseSupport{}))
 
 	commands = append(
 		commands,
-		NewCommandItem(c.com.Styles, "quit", "Quit", km.Quit.Help().Key, tea.QuitMsg{}).WithAliases("exit"),
+		NewCommandItem(c.com.Styles, "quit", "Quit", tea.QuitMsg{}).WithShortcut(km.Quit).WithAliases("exit"),
 	)
 
 	return commands

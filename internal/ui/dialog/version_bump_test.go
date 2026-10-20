@@ -62,7 +62,7 @@ func TestCommandItem_MutatorsBumpVersion(t *testing.T) {
 	t.Parallel()
 
 	sty := styles.CharmtonePantera()
-	item := NewCommandItem(&sty, "id", "Title", "ctrl+t", nil)
+	item := NewCommandItem(&sty, "id", "Title", nil)
 
 	requireBump(t, "SetFocused[true]", item, func() {
 		item.SetFocused(true)
