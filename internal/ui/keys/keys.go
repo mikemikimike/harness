@@ -692,6 +692,28 @@ func Merge(desc string, bindings ...key.Binding) key.Binding {
 	)
 }
 
+// Without returns a copy of b that no longer fires on any key of the
+// consumed bindings. The help label is kept only while it still names a
+// key the copy fires on, so a surface that lets its own bindings consume
+// keys first never shows a hint for a key that cannot reach b.
+func Without(b key.Binding, consumed ...key.Binding) key.Binding {
+	taken := map[string]bool{}
+	for _, c := range consumed {
+		for _, k := range c.Keys() {
+			taken[k] = true
+		}
+	}
+	remaining := slices.DeleteFunc(slices.Clone(b.Keys()), func(k string) bool { return taken[k] })
+	help := b.Help()
+	if len(remaining) != len(b.Keys()) && !slices.Contains(remaining, help.Key) {
+		help.Key = ""
+	}
+	return key.NewBinding(
+		key.WithKeys(remaining...),
+		key.WithHelp(help.Key, help.Desc),
+	)
+}
+
 // keybindActions maps the stable action names accepted by
 // options.tui.keybinds to the bindings they override. Names mirror the
 // KeyMap fields: the global group is bare, the editor group carries the
