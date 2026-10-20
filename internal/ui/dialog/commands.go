@@ -138,11 +138,6 @@ func (c *Commands) InitialCmd() tea.Cmd {
 	return nil
 }
 
-// Cursor returns the cursor position relative to the dialog.
-func (c *Commands) Cursor() *tea.Cursor {
-	return InputCursor(c.com.Styles, c.input.Cursor())
-}
-
 // commandsRadioView generates the command type selector radio buttons.
 func commandsRadioView(sty *styles.Styles, tabs []commandMenu, selected CommandType) string {
 	if len(tabs) < 2 {

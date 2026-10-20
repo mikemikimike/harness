@@ -198,11 +198,6 @@ func (m *Models) HandleMsg(msg tea.Msg) Action {
 	return nil
 }
 
-// Cursor returns the cursor for the dialog.
-func (m *Models) Cursor() *tea.Cursor {
-	return InputCursor(m.com.Styles, m.input.Cursor())
-}
-
 // modelTypeRadioView returns the radio view for model type selection.
 func (m *Models) modelTypeRadioView() string {
 	t := m.com.Styles

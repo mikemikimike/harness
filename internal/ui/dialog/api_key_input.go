@@ -9,6 +9,7 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/exp/charmtone"
 	"github.com/stubbedev/harness/internal/catalog"
@@ -154,11 +155,11 @@ func (m *APIKeyInput) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 
 	m.width = DialogWidth(t, area)
 	innerWidth := DialogInnerWidth(t, m.width) - 2
-	m.input.SetWidth(max(0, innerWidth-t.Dialog.InputPrompt.GetHorizontalFrameSize()-1)) // (1) cursor padding
+	m.input.SetWidth(max(0, innerWidth-apiKeyInputStyle(t).GetHorizontalFrameSize()-1)) // (1) cursor padding
 
 	textStyle := t.Dialog.SecondaryText
 	dialogStyle := ActiveFrame(t).Width(m.width)
-	inputStyle := t.Dialog.InputPrompt
+	inputStyle := apiKeyInputStyle(t)
 
 	m.input.Prompt = m.spinner.View()
 
@@ -239,9 +240,14 @@ func (m *APIKeyInput) inputView() string {
 	return m.input.View()
 }
 
+func apiKeyInputStyle(t *styles.Styles) lipgloss.Style {
+	return t.Dialog.InputPrompt
+}
+
 // Cursor returns the cursor position relative to the dialog.
 func (m *APIKeyInput) Cursor() *tea.Cursor {
-	return InputCursor(m.com.Styles, m.input.Cursor())
+	t := m.com.Styles
+	return inputCursorIn(m.input.Cursor(), t.Dialog.Title, apiKeyInputStyle(t), ActiveFrame(t), 0)
 }
 
 // FullHelp returns the full help view.

@@ -133,11 +133,6 @@ func (t *Themes) selectedTheme() (string, bool) {
 	return name, ok
 }
 
-// Cursor returns the cursor position relative to the dialog.
-func (t *Themes) Cursor() *tea.Cursor {
-	return InputCursor(t.com.Styles, t.input.Cursor())
-}
-
 // Draw implements [Dialog].
 func (t *Themes) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	st := t.com.Styles

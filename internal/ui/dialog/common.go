@@ -158,22 +158,15 @@ func applyInfoColumnVisibility(items []list.Item, rowWidth, maxPercent int) {
 	}
 }
 
-// InputCursor adjusts the cursor position for an input field within a
-// dialog, for an input that sits under the title. The frame arithmetic
-// follows the active placement, so the bottom-anchored panel's borderless
-// frame does not shift the cursor.
-func InputCursor(t *styles.Styles, cur *tea.Cursor) *tea.Cursor {
-	return inputCursorIn(cur, t.Dialog.Title, ActiveInput(t), ActiveFrame(t), 0)
-}
-
-// inputCursorIn positions a text-input cursor that sits under a title
-// and rowsAbove additional rendered rows, inside the given dialog and
-// input frames. All dialog inputs place their cursor through here so
+// inputCursorIn positions a text-input cursor that sits under a one-line
+// title and rowsAbove additional rendered rows, inside the given dialog
+// and input frames. All dialog inputs place their cursor through here so
 // the frame arithmetic lives in one place.
 func inputCursorIn(cur *tea.Cursor, titleStyle, inputStyle, dialogStyle lipgloss.Style, rowsAbove int) *tea.Cursor {
 	if cur == nil {
 		return nil
 	}
+	const titleRows = 1
 	return common.OffsetCursor(cur, 0, 0,
 		inputStyle.GetBorderLeftSize()+
 			inputStyle.GetMarginLeft()+
@@ -181,8 +174,11 @@ func inputCursorIn(cur *tea.Cursor, titleStyle, inputStyle, dialogStyle lipgloss
 			dialogStyle.GetBorderLeftSize()+
 			dialogStyle.GetPaddingLeft()+
 			dialogStyle.GetMarginLeft(),
-		titleStyle.GetVerticalFrameSize()+
-			inputStyle.GetVerticalFrameSize()+
+		titleRows+
+			titleStyle.GetVerticalFrameSize()+
+			inputStyle.GetMarginTop()+
+			inputStyle.GetBorderTopSize()+
+			inputStyle.GetPaddingTop()+
 			dialogStyle.GetPaddingTop()+
 			dialogStyle.GetMarginTop()+
 			dialogStyle.GetBorderTopSize()+
@@ -244,7 +240,7 @@ func closesWithRule() bool {
 }
 
 // DialogCursor positions a text-input cursor for the active placement.
-// Floating: the input sits under the title, and InputCursor's frame
+// Floating: the input sits under the title, and inputCursorIn's frame
 // arithmetic applies. Bottom-anchored: the input row is self-spaced in
 // the hand-assembled panel - it carries its own gutter, the frame's
 // padding does not wrap it - so the offset reads the input style alone,
@@ -254,7 +250,7 @@ func DialogCursor(t *styles.Styles, view string, cur *tea.Cursor) *tea.Cursor {
 		return nil
 	}
 	if placementTop() {
-		return InputCursor(t, cur)
+		return inputCursorIn(cur, t.Dialog.Title, t.Dialog.InputPrompt, t.Dialog.View, 0)
 	}
 	input := t.Dialog.InputBottom
 	cur.Y = lipgloss.Height(view) - 1

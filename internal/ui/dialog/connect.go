@@ -121,11 +121,6 @@ func (c *Connect) HandleMsg(msg tea.Msg) Action {
 	return nil
 }
 
-// Cursor returns the cursor position relative to the dialog.
-func (c *Connect) Cursor() *tea.Cursor {
-	return InputCursor(c.com.Styles, c.input.Cursor())
-}
-
 // Draw implements [Dialog].
 func (c *Connect) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	st := c.com.Styles

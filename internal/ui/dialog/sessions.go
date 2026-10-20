@@ -225,11 +225,6 @@ func (s *Session) resetMouseClick() {
 	s.lastClickID = ""
 }
 
-// Cursor returns the cursor position relative to the dialog.
-func (s *Session) Cursor() *tea.Cursor {
-	return InputCursor(s.com.Styles, s.input.Cursor())
-}
-
 // Draw implements [Dialog].
 func (s *Session) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := s.com.Styles

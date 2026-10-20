@@ -219,15 +219,14 @@ func (a *Arguments) HandleMsg(msg tea.Msg) Action {
 	return nil
 }
 
-// Cursor returns the cursor position relative to the dialog.
-// we pass the description height to offset the cursor correctly.
+// Cursor returns the cursor position relative to the dialog: under the
+// title, inside the content frame, below the description and the label
+// row of every field above the focused one.
 func (a *Arguments) Cursor(descriptionHeight int) *tea.Cursor {
-	cursor := InputCursor(a.com.Styles, a.inputs[a.focused].Cursor())
-	if cursor == nil {
-		return nil
-	}
-	cursor.Y += descriptionHeight + a.focused*argumentsFieldHeight - a.viewport.YOffset() + 1
-	return cursor
+	s := a.com.Styles
+	const labelRows = 1
+	rowsAbove := descriptionHeight + a.focused*argumentsFieldHeight - a.viewport.YOffset() + labelRows
+	return inputCursorIn(a.inputs[a.focused].Cursor(), s.Dialog.Title, s.Dialog.Arguments.Content, ActiveFrame(s), rowsAbove)
 }
 
 // Draw implements Dialog.

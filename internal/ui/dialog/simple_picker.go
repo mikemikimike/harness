@@ -123,11 +123,6 @@ func (p *simplePicker) HandleMsg(msg tea.Msg) Action {
 	return nil
 }
 
-// Cursor returns the cursor position relative to the dialog.
-func (p *simplePicker) Cursor() *tea.Cursor {
-	return InputCursor(p.com.Styles, p.input.Cursor())
-}
-
 // Draw implements [Dialog].
 func (p *simplePicker) Draw(scr uv.Screen, area uv.Rectangle) *tea.Cursor {
 	t := p.com.Styles
