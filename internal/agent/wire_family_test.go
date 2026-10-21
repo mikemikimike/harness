@@ -81,17 +81,14 @@ func TestProviderOptionsKeyedForBuiltProvider(t *testing.T) {
 			model := reasoningModel(tc.providerCfg.ID, tc.modelID)
 			provider, err := wireTestCoordinator(t).buildProvider(tc.providerCfg, model.ModelCfg, false)
 			require.NoError(t, err)
-			if router := catalog.ResponsesAPIRouter(catalog.InferenceProvider(tc.providerCfg.ID)); router != nil && router(tc.modelID) {
+			responsesAPIModel := isResponsesAPIModel(tc.providerCfg, tc.modelID)
+			if responsesAPIModel {
 				require.Equal(t, openai.Name, provider.Name())
 			}
 
 			opts := getProviderOptions(model, tc.providerCfg)
 			require.Len(t, opts, 1)
 			require.Contains(t, opts, optionsKey(provider.Name()))
-			responsesAPIModel := openai.IsResponsesModel(tc.modelID)
-			if router := catalog.ResponsesAPIRouter(catalog.InferenceProvider(tc.providerCfg.ID)); router != nil {
-				responsesAPIModel = router(tc.modelID)
-			}
 			if responsesAPIModel {
 				parsed, ok := opts[openai.Name].(*openai.ResponsesProviderOptions)
 				require.True(t, ok, "Responses API routes must use Responses provider options")
